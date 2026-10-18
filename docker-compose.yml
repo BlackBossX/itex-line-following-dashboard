@@ -1,0 +1,29 @@
+version: '3.9'
+
+services:
+  itex-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: itex-dashboard
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    restart: unless-stopped
+    volumes:
+      # Mount assets so logos can be updated without rebuild
+      - ./public/assets:/app/public/assets:ro
+    networks:
+      - itex-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  itex-net:
+    driver: bridge
