@@ -4,7 +4,7 @@
 :root {
   --display-header-logo-width: 112px;                 /* ITEX in the top bar */
   --display-itex-width: clamp(190px, 18vw, 300px);    /* Big center ITEX logo */
-  --display-school-height: clamp(64px, 9vh, 104px);   /* Left school logo */
+  --display-school-height: clamp(64px, 10vh, 104px);   /* Left school logo */
   --display-society-height: clamp(70px, 11vh, 130px); /* Right society logo */
   --display-side-logo-width: 120px;                 /* Space for each side logo */
   --display-logo-row-width: 700px;                 /* Smaller = logos closer together */

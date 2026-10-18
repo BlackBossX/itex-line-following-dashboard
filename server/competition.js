@@ -21,7 +21,7 @@ function normalizeScores(state) {
   return changed;
 }
 function initialState() {
-  return { teams: Array.from({ length: 32 }, (_, i) => ({ id: i + 1, name: `Team ${i + 1}`, robotName: `Robot ${i + 1}`, session: {}, attempts: [] })), nextTeamId: 33, currentTeamId: null, view: 'live', winnerIds: [] };
+  return { teams: Array.from({ length: 5 }, (_, i) => ({ id: i + 1, name: `Team ${i + 1}`, robotName: '', session: {}, attempts: [] })), nextTeamId: 6, currentTeamId: null, view: 'live', winnerIds: [] };
 }
 function resetTeam(team) {
   team.session = { generation: (team.session.generation || 0) + 1 };
@@ -40,6 +40,11 @@ function leaderboard(teams) {
 function requireCondition(condition, message) { if (!condition) throw new Error(message); }
 function windowActive(team, now) { return !team.session.runEndedAt && (!!team.session.runPausedAt || team.session.runEndsAt > now); }
 function calibrationActive(team, now) { return !team.session.runEndsAt && (!!team.session.calibrationPausedAt || team.session.calibrationEndsAt > now); }
+function reviewReady(team, now = Date.now()) {
+  return !!team.session.runEndsAt && !team.attempts.some(a => a.status === 'running') &&
+    (!windowActive(team, now) || team.attempts.length === MAX_ATTEMPTS) &&
+    team.attempts.length > 0 && team.attempts.every(a => a.status === 'scored');
+}
 function settle(teams, now) {
   let changed = false;
   for (const t of teams) {
@@ -52,10 +57,11 @@ function settle(teams, now) {
   }
   return changed;
 }
-function apply(state, msg, now = Date.now()) {
+function apply(state, msg, now = Date.now(), coordinator = false) {
+  if (coordinator) requireCondition(msg.type === 'EDIT_ATTEMPT', 'Use competition control for roster and timer changes.');
   requireCondition((msg.resetVersion || 0) === (state.resetVersion || 0), 'Competition data was reset. Review the latest state before retrying.');
   const teams = state.teams;
-  const t = teams.find(t => t.id === state.currentTeamId);
+  const t = teams.find(t => t.id === (coordinator ? msg.teamId : state.currentTeamId));
   const selected = () => { requireCondition(t, 'Select a team first.'); requireCondition(msg.teamId === t.id, 'The selected team changed. Review the current team before trying again.'); requireCondition((msg.generation || 0) === (t.session.generation || 0), 'This team was reset. Review its latest data before retrying.'); return t; };
   switch (msg.type) {
     case 'RESET_TEAM':
@@ -67,17 +73,27 @@ function apply(state, msg, now = Date.now()) {
         const defaults = initialState(); state.teams = defaults.teams; state.nextTeamId = defaults.nextTeamId;
       } else teams.forEach(resetTeam);
       state.resetVersion = (state.resetVersion || 0) + 1;
-      state.currentTeamId = null; state.winnerIds = []; state.view = 'live'; break;
+      state.currentTeamId = null; state.winnerIds = []; state.view = 'live'; delete state.shuffledAt; break;
+    }
+    case 'SHUFFLE_TEAMS': {
+      requireCondition(teams.length > 1, 'Add at least two teams before shuffling.');
+      requireCondition(!teams.some(t => t.attempts.length || t.session.runEndsAt || t.session.calibrationEndsAt), 'Shuffle before calibration or competition starts. Reset competition data first to create a new order.');
+      requireCondition(msg.rosterVersion === (state.rosterVersion || 0), 'The roster changed. Review the latest teams before shuffling again.');
+      const { randomInt } = require('node:crypto');
+      for (let i = teams.length - 1; i > 0; i--) {
+        const j = randomInt(i + 1); [teams[i], teams[j]] = [teams[j], teams[i]];
+      }
+      state.rosterVersion = (state.rosterVersion || 0) + 1;
+      state.shuffledAt = now; break;
     }
     case 'ADD_TEAM': {
       requireCondition(typeof msg.name === 'string' && msg.name.trim() && msg.name.length <= 100, 'Enter a team name (100 characters or fewer).');
-      requireCondition(typeof msg.robotName === 'string' && msg.robotName.length <= 100, 'Enter a valid robot name.');
-      teams.push({ id: state.nextTeamId++, name: msg.name.trim(), robotName: msg.robotName.trim() || 'Robot', session: {}, attempts: [] }); break;
+      teams.push({ id: state.nextTeamId++, name: msg.name.trim(), robotName: '', session: {}, attempts: [] }); break;
     }
     case 'UPDATE_TEAM': {
       selected();
-      requireCondition(typeof msg.name === 'string' && msg.name.trim() && msg.name.length <= 100 && typeof msg.robotName === 'string' && msg.robotName.length <= 100, 'Enter valid team and robot names.');
-      t.name = msg.name.trim(); t.robotName = msg.robotName.trim(); break;
+      requireCondition(typeof msg.name === 'string' && msg.name.trim() && msg.name.length <= 100, 'Enter a valid team name (100 characters or fewer).');
+      t.name = msg.name.trim(); break;
     }
     case 'REMOVE_TEAM':
       selected(); requireCondition(!windowActive(t, now), 'Wait until this team’s run window ends.');
@@ -132,7 +148,9 @@ function apply(state, msg, now = Date.now()) {
     }
     case 'SAVE_ATTEMPT':
     case 'EDIT_ATTEMPT': {
-      selected(); const a = t.attempts.find(a => a.number === msg.number && a.status === (msg.type === 'SAVE_ATTEMPT' ? 'pending' : 'scored'));
+      selected();
+      if (coordinator) requireCondition(reviewReady(t, now), 'Coordinator editing unlocks after the team finishes its rounds and judges save marks for every attempt.');
+      const a = t.attempts.find(a => a.number === msg.number && a.status === (msg.type === 'SAVE_ATTEMPT' ? 'pending' : 'scored'));
       requireCondition(a, 'This attempt is no longer available. Reload and try again.');
       requireCondition(msg.revision === a.revision, 'Another operator updated this attempt. Reload its scores before saving.');
       requireCondition(Array.isArray(msg.scores) && msg.scores.length === 3 && msg.scores.every(n => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1000000), 'Enter a non-negative total for each of the three judges.');
@@ -145,16 +163,17 @@ function apply(state, msg, now = Date.now()) {
       a.completed = msg.completed; a.status = 'scored'; a.revision++; a.updatedAt = now; break;
     }
     case 'SET_VIEW':
-      requireCondition(['live', 'rules'].includes(msg.view), 'Unknown display view.'); state.view = msg.view; state.winnerIds = []; break;
+      requireCondition(['live', 'rules', 'teams'].includes(msg.view), 'Unknown display view.'); state.view = msg.view; state.winnerIds = []; break;
     case 'ANNOUNCE_WINNER': {
       const rows = leaderboard(teams); requireCondition(rows.length, 'Save at least one scored attempt first.');
       state.winnerIds = rows.filter(t => t.rank === 1).map(t => t.id); state.view = 'winner'; break;
     }
     default: throw new Error('Unknown action. Reload the dashboard and try again.');
   }
+  if (['ADD_TEAM', 'REMOVE_TEAM', 'UPDATE_TEAM', 'RESET_ALL'].includes(msg.type)) state.rosterVersion = (state.rosterVersion || 0) + 1;
   // A changed score or roster invalidates a previously announced result.
   if (['RESET_TEAM', 'RESET_ALL', 'SAVE_ATTEMPT', 'EDIT_ATTEMPT', 'UPDATE_TEAM', 'REMOVE_TEAM', 'ADD_TEAM', 'START_SESSION'].includes(msg.type)) {
     state.winnerIds = []; if (state.view === 'winner') state.view = 'live';
   }
 }
-module.exports = { attemptScore, normalizeScores, COMPLETION_BONUS, initialState, apply, settle, leaderboard, bestAttempt, WINDOW_MS, CALIBRATION_MS, MAX_ATTEMPTS, windowActive, calibrationActive };
+module.exports = { attemptScore, normalizeScores, COMPLETION_BONUS, initialState, apply, settle, leaderboard, bestAttempt, WINDOW_MS, CALIBRATION_MS, MAX_ATTEMPTS, windowActive, calibrationActive, reviewReady };

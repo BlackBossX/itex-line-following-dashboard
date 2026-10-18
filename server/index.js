@@ -25,7 +25,8 @@ app.get('/rules', (req, res) => res.sendFile(path.join(__dirname, '../public/rul
 app.get('/api/state', (req, res) => res.json(snapshot()));
 app.get('/api/export', (req, res) => res.attachment('itex-results.json').json(snapshot()));
 wss.on('connection', (ws, req) => {
-  const readonly = new URL(req.url, 'http://localhost').searchParams.get('role') === 'display';
+  const role = new URL(req.url, 'http://localhost').searchParams.get('role');
+  const readonly = role === 'display';
   ws.readonly = readonly;
   ws.send(JSON.stringify({ type: 'FULL_STATE', state: snapshot(readonly) }));
   ws.on('message', raw => {
@@ -33,9 +34,9 @@ wss.on('connection', (ws, req) => {
     try {
       msg = JSON.parse(raw);
       if (!msg || typeof msg !== 'object') throw new Error('Invalid action.');
-      if (readonly) throw new Error('Use the admin panel to make changes.');
+      if (readonly && (msg.type !== 'SHUFFLE_TEAMS' || state.view !== 'teams')) throw new Error('The display can only shuffle the team list before competition starts.');
       const next = structuredClone(state);
-      settle(next.teams, Date.now()); apply(next, msg);
+      settle(next.teams, Date.now()); apply(next, msg, Date.now(), role === 'coordinator');
       store.save(next); state = next;
       publish(); ws.send(JSON.stringify({ type: 'SUCCESS', requestId: msg.requestId, action: msg.type }));
     } catch (error) {

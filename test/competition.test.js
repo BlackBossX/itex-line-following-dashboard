@@ -178,7 +178,7 @@ test('full reset restores default teams and IDs and survives SQLite reopen', () 
     const filename = path.join(dir, 'event.sqlite'); let store = openStore(filename); const s = store.load();
     s.teams[0].name = 'Renamed'; apply(s, { type: 'ADD_TEAM', name: 'Extra team', robotName: 'Custom robot' });
     apply(s, { type: 'RESET_ALL', confirmation: 'RESET ALL', resetRoster: true });
-    assert.equal(s.teams.length, 32); assert.equal(s.teams[0].name, 'Team 1'); assert.equal(s.nextTeamId, 33);
+    assert.equal(s.teams.length, 5); assert.equal(s.teams[0].name, 'Team 1'); assert.equal(s.nextTeamId, 6);
     store.save(s); store.db.close(); store = openStore(filename); assert.deepEqual(store.load(), s); store.db.close();
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
@@ -187,6 +187,8 @@ test('winner can be announced after any number of scored teams without waiting f
   const { initialState } = require('../server/competition');
   for (const count of [1, 5, 10]) {
     const s = initialState();
+    while (s.teams.length <= count) apply(s, { type: 'ADD_TEAM', name: `Extra ${s.nextTeamId}` });
+    const rosterSize = s.teams.length;
     for (let i = 0; i < count; i++) {
       s.teams[i].attempts = [{ number: 1, status: 'scored', scores: [i + 1, i + 1, i + 1], total: (i + 1) * 3, time: 10000, completed: true }];
     }
@@ -197,7 +199,7 @@ test('winner can be announced after any number of scored teams without waiting f
     assert.deepEqual(s.winnerIds, [count]);
     assert.equal(s.view, 'winner');
     assert.equal(s.teams[count].attempts[0].status, 'running');
-    assert.equal(s.teams.length, 32);
+    assert.equal(s.teams.length, rosterSize);
   }
 });
 test('announcing ignores pending attempts but keeps the best saved score and rejects an empty result', () => {
@@ -249,4 +251,91 @@ test('older saved completed attempts gain bonus once on reload and stale winners
     assert.equal(leaderboard(migrated.teams)[0].id, 1); store.db.close();
     store = openStore(file); assert.deepEqual(store.load(), migrated); store.db.close();
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('five default teams; names can be added and edited without a robot name', () => {
+  const { initialState } = require('../server/competition');
+  const s = initialState(); assert.equal(s.teams.length, 5);
+  apply(s, { type: 'ADD_TEAM', name: 'Track crew' });
+  s.currentTeamId = 6; apply(s, { type: 'UPDATE_TEAM', name: 'Track crew revised' });
+  assert.equal(s.teams[5].name, 'Track crew revised');
+});
+test('shuffle keeps identities and selection, persists order, rejects stale draws and locks after calibration', () => {
+  const { initialState } = require('../server/competition');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'itex-order-'));
+  let store;
+  try {
+    store = openStore(path.join(dir, 'event.sqlite'));
+    const s = initialState(); s.currentTeamId = 3;
+    const original = new Map(s.teams.map(t => [t.id, structuredClone(t)]));
+    apply(s, { type: 'SHUFFLE_TEAMS', rosterVersion: 0 }, start);
+    assert.deepEqual(s.teams.map(t => t.id).sort(), [1,2,3,4,5]);
+    s.teams.forEach(t => assert.deepEqual(t, original.get(t.id)));
+    assert.equal(s.currentTeamId, 3); assert.equal(s.shuffledAt, start);
+    assert.throws(() => apply(s, { type: 'SHUFFLE_TEAMS', rosterVersion: 0 }, start + 1), /roster changed/);
+    // Persist a deliberately non-ID order, regardless of the random draw.
+    s.teams = [s.teams.find(t => t.id === 5), ...s.teams.filter(t => t.id !== 5)];
+    store.save(s); store.db.close(); store = openStore(path.join(dir, 'event.sqlite'));
+    assert.deepEqual(store.load(), s);
+    apply(s, { type: 'START_CALIBRATION' }, start + 100);
+    assert.throws(() => apply(s, { type: 'SHUFFLE_TEAMS', rosterVersion: 1 }, start + 101), /before calibration/);
+  } finally { store?.db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+test('coordinator corrects a different team without switching or interrupting the active run; stale corrections rejected', () => {
+  const s = fresh(); apply(s, { type: 'START_SESSION' }, start); attempt(s, [10,20,30]);
+  apply(s, { type: 'END_SESSION' }, start + 20000);
+  apply(s, { type: 'SET_CURRENT_TEAM', id: 2 }, start + 21000);
+  apply(s, { type: 'START_SESSION' }, start + 22000); apply(s, { type: 'START_ATTEMPT' }, start + 23000);
+  const active = structuredClone(s.teams[1]);
+  const correction = { type: 'EDIT_ATTEMPT', teamId: 1, revision: 1, number: 1, scores: [90,80,70], completed: false, time: 5000 };
+  applyAction(s, correction, start + 24000, true);
+  assert.equal(s.currentTeamId, 2); assert.deepEqual(s.teams[1], active);
+  assert.equal(s.teams[0].attempts[0].total, 240);
+  assert.throws(() => applyAction(s, correction, start + 25000, true), /Another operator/);
+  assert.throws(() => applyAction(s, { type: 'START_ATTEMPT', teamId: 1 }, start + 25000, true), /competition control/);
+  assert.throws(() => applyAction(s, { ...correction, revision: 2, generation: 8 }, start + 25000, true), /reset/);
+});
+test('legacy roster migration reduces only untouched defaults and retains entered event data', () => {
+  const { initialState } = require('../server/competition');
+  for (const edited of [false, true]) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'itex-legacy-')); let store;
+    try {
+      store = openStore(path.join(dir, 'event.sqlite'));
+      const s = initialState(); s.teams = Array.from({ length: 32 }, (_, i) => ({ id: i + 1, name: `Team ${i + 1}`, robotName: `Robot ${i + 1}`, session: {}, attempts: [] })); s.nextTeamId = 33;
+      if (edited) s.teams[0].name = 'Entered team';
+      store.save(s); store.db.close(); store = openStore(path.join(dir, 'event.sqlite'));
+      assert.equal(store.load().teams.length, edited ? 32 : 5);
+      if (edited) assert.equal(store.load().teams[0].name, 'Entered team');
+    } finally { store?.db.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+  }
+});
+
+test('coordinator edits unlock only after all rounds finish and all judges marks are saved', () => {
+  const { reviewReady } = require('../server/competition');
+  const s = fresh();
+  const correction = { type: 'EDIT_ATTEMPT', teamId: 1, number: 1, revision: 1, scores: [7,8,9], completed: false, time: 1000 };
+  assert.equal(reviewReady(s.teams[0], start), false);
+  apply(s, { type: 'START_SESSION' }, start); attempt(s, [1,2,3]);
+  assert.throws(() => applyAction(s, correction, start + 20000, true), /unlocks/);
+  apply(s, { type: 'PAUSE_SESSION' }, start + 21000);
+  assert.throws(() => applyAction(s, correction, start + WINDOW_MS + 1, true), /unlocks/);
+  apply(s, { type: 'RESUME_SESSION' }, start + 22000);
+  apply(s, { type: 'START_ATTEMPT' }, start + 23000);
+  assert.throws(() => applyAction(s, correction, start + 24000, true), /unlocks/);
+  apply(s, { type: 'STOP_ATTEMPT' }, start + 25000); apply(s, { type: 'END_SESSION' }, start + 26000);
+  assert.throws(() => applyAction(s, correction, start + 27000, true), /unlocks/);
+  assert.throws(() => applyAction(s, { ...correction, type: 'SAVE_ATTEMPT', number: 2, revision: 0 }, start + 27000, true), /competition control/);
+  apply(s, { type: 'SAVE_ATTEMPT', number: 2, revision: 0, scores: [4,5,6], completed: false }, start + 28000);
+  applyAction(s, correction, start + 29000, true);
+  assert.equal(s.teams[0].attempts[0].total, 24);
+});
+test('coordinator review unlocks after four marked attempts or expiry, and reset locks it again', () => {
+  const { reviewReady } = require('../server/competition');
+  const s = fresh(); apply(s, { type: 'START_SESSION' }, start);
+  for (let i = 0; i < 4; i++) attempt(s, [i,i,i], 1000, start + 1000 + i * 4000);
+  assert.equal(reviewReady(s.teams[0], start + 20000), true);
+  apply(s, { type: 'RESET_TEAM', confirmed: true }, start + 21000);
+  assert.equal(reviewReady(s.teams[0], start + 22000), false);
+  apply(s, { type: 'START_SESSION' }, start + 23000); attempt(s, [1,2,3], 1000, start + 24000);
+  assert.equal(reviewReady(s.teams[0], start + 23000 + WINDOW_MS), true);
 });

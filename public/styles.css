@@ -75,3 +75,42 @@ body.timer-warning .window-track>div{background:#ff9b9b}
 @media(min-width:761px) and (max-height:850px){.audience-branding{min-height:84px;padding:16px 24px 0;gap:24px}.audience-branding .organizer-logo{height:62px}.audience-branding .event-logo{width:200px}body[data-page=display] .audience-timer .time{font-size:clamp(4rem,18vh,10rem)}body[data-page=display] .audience-attempt{padding-top:12px;padding-bottom:4px}}
 @media(max-width:760px){.header .itex-mark{width:96px}.display-header-controls{gap:12px}.audience-branding{gap:18px;min-height:130px;padding:24px 0 8px;grid-template-columns:1fr 1.5fr 1fr}.audience-branding .organizer-logo{width:56px;height:64px}.audience-branding .event-logo{width:140px}body[data-page=display] .audience-stage{min-height:calc(100svh - 76px)}.sound-toggle{font-size:.75rem;padding:6px 10px}}
 @media(prefers-reduced-motion:reduce){body.timer-warning #sessionTime{animation:none}}
+/* Staff review uses the competition's existing surfaces and score forms. */
+.shuffle-button{width:100%;margin-top:16px}
+.shuffle-reveal{padding:24px;margin-bottom:24px;background:var(--surface);border:1px solid var(--accent);border-radius:12px;overflow:hidden}
+.shuffle-reveal .panel-heading{align-items:flex-start}
+.draw-order{list-style:none;display:flex;flex-wrap:wrap;gap:10px;padding:0;margin:0;perspective:800px}
+.draw-order li{display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--bg);border-radius:8px;min-width:145px;max-width:100%;overflow-wrap:anywhere}
+.draw-order li span{color:var(--accent);font-size:1.5rem;font-variant-numeric:tabular-nums}
+.draw-order li strong{font-weight:550;min-width:0}
+.drawing .draw-order li{animation:draw-team 1.45s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(var(--draw-index) * 30ms)}
+@keyframes draw-team{0%{transform:translateY(12px) rotateX(65deg);filter:blur(3px)}25%{transform:translateX(18px) rotateX(-35deg)}50%{transform:translateX(-10px) rotateX(20deg);filter:blur(1px)}100%{transform:translate(0) rotateX(0);filter:blur(0)}}
+.coordinator-content{max-width:1800px}
+.review-status{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:24px;padding:18px 0;border-block:1px solid var(--border);font-size:.9rem}
+.review-status strong{font-weight:550}
+.review-layout{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(340px,1fr);gap:24px;align-items:start}
+.review-team{padding:24px 0;border-top:1px solid var(--border)}
+.review-team:last-child{padding-bottom:0}
+.review-team .panel-heading{margin-bottom:10px}
+.review-team h2{overflow-wrap:anywhere}
+.review-team .panel-heading button{flex-shrink:0;font-size:.8rem}
+.review-selected .panel-heading button{color:var(--accent);border-color:var(--accent)}
+.review-editor{scroll-margin-top:24px}
+.review-editor .score-summary button{width:100%}
+@media(max-width:1180px){.review-layout{grid-template-columns:minmax(0,1fr)}.review-status{align-items:flex-start;flex-direction:column}}
+@media(max-width:760px){.review-team .panel-heading{align-items:flex-start}.shuffle-reveal{padding:18px}.draw-order{gap:8px}.draw-order li{min-width:0;width:100%}.review-status{margin-bottom:18px}.review-layout{gap:0}}
+@media(prefers-reduced-motion:reduce){.drawing .draw-order li{animation:none}}
+/* Audience draw board and coordinator review states. */
+.team-order-stage{max-width:1280px;margin:auto;padding:12px 0 36px}
+.team-order-stage h1{font-size:clamp(2rem,4vw,3.5rem)}
+.team-order-stage .page-title{margin-bottom:18px}
+.order-hint{margin-bottom:28px;font-size:.95rem}
+.public-team-order{list-style:none;padding:0;margin:0 0 28px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 36px}
+.public-team-order li{display:flex;align-items:center;gap:24px;padding:25px 4px;border-bottom:1px solid var(--border);min-width:0}
+.public-team-order li>span{font-variant-numeric:tabular-nums;color:var(--accent);font-size:clamp(1.5rem,3vw,2.6rem);flex-shrink:0}
+.public-team-order strong{font-size:clamp(1.3rem,2.7vw,2.25rem);font-weight:550;overflow-wrap:anywhere;min-width:0}
+.review-support{min-width:0}
+.review-lock{line-height:1.7}
+@media(max-width:760px){.public-team-order{grid-template-columns:minmax(0,1fr)}.public-team-order li{padding:20px 0;gap:20px}.team-order-stage .page-title button{width:100%}.team-order-stage{padding-top:0}.review-team .badge.best{display:block;width:max-content}}
+.public-team-order.drawing li{animation:draw-team 1.45s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(var(--draw-index) * 30ms)}
+@media(prefers-reduced-motion:reduce){.public-team-order.drawing li{animation:none}}

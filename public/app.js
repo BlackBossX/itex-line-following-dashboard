@@ -14,7 +14,7 @@ function briefing() {
 }
 if (page === 'rules') $('brief').innerHTML = briefing();
 let state = null, ws, offset = 0, connected = false, toastTimer;
-let formKey = null, lastTeamId = null, displayKey = null;
+let formKey = null, lastTeamId = null, displayKey = null, reviewTeamId = null, lastShuffle = null, reviewReadiness = '';
 const scoreDrafts = new Map();
 const requests = new Map();
 function notify(message, error = false) {
@@ -36,7 +36,7 @@ function confirmCompetitionReset() {
   return new Promise(resolve => {
     const dialog = document.createElement('dialog'); dialog.className = 'confirm-dialog';
     dialog.setAttribute('aria-labelledby', 'resetTitle');
-    dialog.innerHTML = `<form method="dialog"><h2 id="resetTitle">Reset all competition data</h2><p>Stops every timer and clears all attempts, judge marks, standings, and the announced winner. Team and robot names are kept unless you choose to restore the roster below. This cannot be undone.</p><label class="check"><input id="resetRosterChoice" type="checkbox">Also restore the default 32-team roster</label><p class="note">Restoring the roster removes custom teams and restores default team and robot names.</p><label>Type RESET ALL to confirm<input id="resetPhrase" autocomplete="off" spellcheck="false"></label><div class="toolbar" style="margin-top:24px"><button type="button" data-cancel>Cancel</button><button type="submit" class="danger" value="confirm" disabled>Reset all data</button></div></form>`;
+    dialog.innerHTML = `<form method="dialog"><h2 id="resetTitle">Reset all competition data</h2><p>Stops every timer and clears all attempts, judge marks, standings, and the announced winner. Team names are kept unless you choose to restore the roster below. This cannot be undone.</p><label class="check"><input id="resetRosterChoice" type="checkbox">Also restore the default 5-team roster</label><p class="note">Restoring the roster removes custom teams and restores default team names.</p><label>Type RESET ALL to confirm<input id="resetPhrase" autocomplete="off" spellcheck="false"></label><div class="toolbar" style="margin-top:24px"><button type="button" data-cancel>Cancel</button><button type="submit" class="danger" value="confirm" disabled>Reset all data</button></div></form>`;
     document.body.append(dialog);
     const input = dialog.querySelector('#resetPhrase'), confirm = dialog.querySelector('[type="submit"]');
     input.oninput = () => { confirm.disabled = input.value !== 'RESET ALL'; };
@@ -54,10 +54,19 @@ function send(type, payload = {}, success = 'Changes saved.') {
   requests.set(requestId, { success, timeout });
   ws.send(JSON.stringify({ type, resetVersion: state?.resetVersion || 0, generation: current()?.session.generation || 0, teamId: state?.currentTeamId, ...payload, requestId }));
 }
-function current() { return state?.teams.find(t => t.id === state.currentTeamId); }
+function current() { return state?.teams.find(t => t.id === (page === 'coordinator' ? reviewTeamId : state.currentTeamId)); }
 function runAttempt(t = current()) { return t?.attempts.find(a => a.status === 'running'); }
 function runActive(t) { return t && !t.session.runEndedAt && (!!t.session.runPausedAt || t.session.runEndsAt > now()); }
 function calibrationActive(t) { return t && !t.session.runEndsAt && (!!t.session.calibrationPausedAt || t.session.calibrationEndsAt > now()); }
+function reviewReady(t) {
+  return !!t?.session.runEndsAt && !runAttempt(t) && (!runActive(t) || t.attempts.length === 4) &&
+    t.attempts.length > 0 && t.attempts.every(a => a.status === 'scored');
+}
+function reviewLockReason(t) {
+  if (!t?.session.runEndsAt) return 'View only · Waiting for the team to finish its rounds.';
+  if (runAttempt(t) || (runActive(t) && t.attempts.length < 4)) return 'View only · This team’s rounds are still ongoing.';
+  return 'View only · Waiting for judges to save marks for every attempt.';
+}
 function now() { return Date.now() + offset; }
 function session(t) {
   const s = t?.session || {};
@@ -67,13 +76,13 @@ function session(t) {
 }
 function rankingHtml(rows, limit) {
   if (!rows?.length) return '<li class="empty">Standings appear after the first scored attempt.</li>';
-  return rows.slice(0, limit || rows.length).map(t => `<li><span class="rank-number">${t.rank}</span><div class="rank-name"><strong>${escapeHtml(t.name)}</strong><small>${escapeHtml(t.robotName)} · Attempt ${t.best.number}</small></div><div class="rank-score">${marks(t.best.total)}<small>${t.best.completed ? time(t.best.time) : 'Incomplete'}</small></div></li>`).join('');
+  return rows.slice(0, limit || rows.length).map(t => `<li><span class="rank-number">${t.rank}</span><div class="rank-name"><strong>${escapeHtml(t.name)}</strong><small>Attempt ${t.best.number}</small></div><div class="rank-score">${marks(t.best.total)}<small>${t.best.completed ? time(t.best.time) : 'Incomplete'}</small></div></li>`).join('');
 }
 function renderTeams() {
   const query = $('teamSearch').value.trim().toLowerCase();
   $('teamCount').textContent = `(${state.teams.length})`;
-  const teams = state.teams.filter(t => `${t.name} ${t.robotName}`.toLowerCase().includes(query));
-  $('teamList').innerHTML = teams.length ? teams.map(t => `<button class="team-item" data-team="${t.id}" aria-pressed="${t.id === state.currentTeamId}"><span class="team-number">${String(t.id).padStart(2, '0')}</span><span class="team-name"><strong>${escapeHtml(t.name)}</strong><small>${escapeHtml(t.robotName)} · ${t.attempts.length}/4 used</small></span>${t.best ? `<span class="team-mark">${marks(t.best.total)}</span>` : ''}</button>`).join('') : '<p class="empty">No teams found.</p>';
+  const teams = state.teams.filter(t => t.name.toLowerCase().includes(query));
+  $('teamList').innerHTML = teams.length ? teams.map(t => `<button class="team-item" data-team="${t.id}" aria-pressed="${t.id === state.currentTeamId}"><span class="team-number">${String(state.teams.findIndex(team => team.id === t.id) + 1).padStart(2, '0')}</span><span class="team-name"><strong>${escapeHtml(t.name)}</strong><small>${t.attempts.length}/4 attempts used</small></span>${t.best ? `<span class="team-mark">${marks(t.best.total)}</span>` : ''}</button>`).join('') : '<p class="empty">No teams found.</p>';
 }
 function rememberScoreDrafts() {
   document.querySelectorAll('[data-score-form]').forEach(form => {
@@ -82,9 +91,10 @@ function rememberScoreDrafts() {
 }
 function renderForm() {
   const t = current(), attempts = t?.attempts.filter(a => a.status !== 'running') || [];
-  const key = `${state?.resetVersion || 0}:${t?.session.generation || 0}:${t?.id}:${attempts.map(a => `${a.number}:${a.revision}`).join(',')}`;
+  const key = `${state?.resetVersion || 0}:${t?.session.generation || 0}:${t?.id}:${page === 'coordinator' ? reviewReady(t) : true}:${attempts.map(a => `${a.number}:${a.revision}`).join(',')}`;
   if (key === formKey) return;
   rememberScoreDrafts(); formKey = key;
+  if (page === 'coordinator' && !reviewReady(t)) { $('judgingForms').innerHTML = `<p class="empty review-lock">${escapeHtml(reviewLockReason(t))}</p>`; return; }
   $('judgingForms').innerHTML = attempts.length ? attempts.map(a => {
     const draftKey = `${state.resetVersion || 0}:${t.session.generation || 0}:${t.id}:${a.number}:${a.revision}`, draft = scoreDrafts.get(draftKey);
     const value = i => escapeHtml(draft?.[`judge${i}`] ?? a.scores?.[i - 1] ?? '');
@@ -104,19 +114,19 @@ function renderAdmin() {
   const t = current();
   if (lastTeamId !== t?.id) { formKey = null; lastTeamId = t?.id; $('teamDetails').open = false; }
   renderTeams();
-  $('teamHeader').innerHTML = t ? `<div><h2>${escapeHtml(t.name)}</h2><p>${escapeHtml(t.robotName)}</p></div><span class="badge">${t.best ? 'Best score · ' + marks(t.best.total) : 'No scored attempts'}</span>` : '<div><h2>Select a team</h2><p>Choose a team from the roster to begin.</p></div>';
+  $('teamHeader').innerHTML = t ? `<div><h2>${escapeHtml(t.name)}</h2><p>Running order · ${state.teams.findIndex(team => team.id === t.id) + 1} of ${state.teams.length}</p></div><span class="badge">${t.best ? 'Best score · ' + marks(t.best.total) : 'No scored attempts'}</span>` : '<div><h2>Select a team</h2><p>Choose a team from the roster to begin.</p></div>';
   $('attemptCount').textContent = `${t?.attempts.length || 0} / 4 used`;
   $('attempts').innerHTML = t?.attempts.length ? `<table><thead><tr><th>Attempt</th><th>Time</th><th class="numeric">Judge 1</th><th class="numeric">Judge 2</th><th class="numeric">Judge 3</th><th class="numeric">Bonus</th><th class="numeric">Combined</th><th></th></tr></thead><tbody>${t.attempts.map(a => `<tr><td><strong>${a.number}</strong>${t.best?.number === a.number ? ' <span class="badge best">Best</span>' : ''}</td><td>${a.status === 'running' ? 'Running' : time(a.time)}<small>${a.status === 'pending' ? 'Awaiting scores' : a.status === 'scored' && !a.completed ? 'Incomplete' : ''}</small></td>${[0, 1, 2].map(i => `<td class="numeric">${marks(a.scores?.[i])}</td>`).join('')}<td class="numeric">${marks(a.bonus)}</td><td class="numeric"><strong>${marks(a.total)}</strong></td><td>${a.status !== 'running' ? `<button class="text-button" data-edit="${a.number}" aria-label="${a.status === 'scored' ? 'Edit' : 'Score'} attempt ${a.number}">${a.status === 'scored' ? 'Edit' : 'Enter marks'}</button>` : ''}</td></tr>`).join('')}</tbody></table>` : `<p class="empty">${t ? 'No attempts recorded. Start the team’s run window when ready.' : 'Select a team to view its attempts.'}</p>`;
   $('leaderboard').innerHTML = rankingHtml(state.leaderboard);
-  $('displayMode').textContent = `Public display: ${state.view === 'rules' ? 'course map & rules' : state.view === 'winner' ? 'results announcement' : 'live timing'}.`;
+  $('displayMode').textContent = `Public display: ${state.view === 'teams' ? 'team list & running order' : state.view === 'rules' ? 'course map & rules' : state.view === 'winner' ? 'results announcement' : 'live timing'}.`;
   if (document.activeElement !== $('editName')) $('editName').value = t?.name || '';
-  if (document.activeElement !== $('editRobot')) $('editRobot').value = t?.robotName || '';
   $('teamDetails').classList.toggle('hidden', !t);
-  renderForm(); updateClock();
+  renderForm(); renderShuffle(); updateClock();
 }
 function renderDisplay() {
+  if (state.view === 'teams') { renderTeamDisplay(); return; }
   const t = current();
-  const key = JSON.stringify([state.view, state.currentTeamId, state.winnerIds, t?.name, t?.robotName, t?.attempts.map(a => [a.number, a.status, a.time])]);
+  const key = JSON.stringify([state.view, state.currentTeamId, state.winnerIds, t?.name, t?.attempts.map(a => [a.number, a.status, a.time])]);
   // Clock ticks and score-only changes never restart the entrance animation.
   if (key === displayKey) { updateClock(); return; }
   displayKey = key;
@@ -128,11 +138,38 @@ function renderDisplay() {
     const a = t?.attempts.find(a => a.number === i + 1);
     return `<div class="audience-attempt ${a?.status === 'running' ? 'on-track' : a ? 'recorded' : ''}"><span>Attempt ${i + 1}</span><strong ${a?.status === 'running' ? 'id="liveAttemptTime"' : ''}>${a?.status === 'running' ? time(0) : a ? time(a.time) : '—'}</strong><small>${a?.status === 'running' ? 'On track' : a ? 'Time recorded' : 'Up next'}</small></div>`;
   }).join('');
-  $('displayContent').innerHTML = `<section class="audience-live ${isWinner ? 'winner-stage' : ''}"><div class="audience-topline"><span class="badge active" id="liveStatus">${isWinner ? (winners.length > 1 ? 'Shared first place' : 'Competition winner') : 'Live competition'}</span><span class="muted">ITEX 2.0 · Line following</span></div><h1>${isWinner ? winners.map(team => escapeHtml(team.name)).join('<br>') : t ? escapeHtml(t.name) : 'Ready for the next team'}</h1><p class="audience-robot">${isWinner ? winners.map(team => escapeHtml(team.robotName)).join(' · ') : t ? escapeHtml(t.robotName) : 'Line following robot competition'}</p>${isWinner ? '<div class="winner-finish" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p class="audience-winner-caption">Congratulations to our winners</p>' : `<div class="timer audience-timer"><div class="time" id="attemptTime">${largeTime(0)}</div><p id="attemptHint">Attempt timer</p></div><div class="audience-window"><div><div class="session-label" id="sessionLabel">Run window remaining</div><div class="session-time" id="sessionTime">10:00</div></div><p id="audienceAttemptLabel">Four attempts. One course.</p></div><div class="window-track" aria-hidden="true"><div id="windowProgress"></div></div><div class="audience-attempts">${attempts}</div>`}</section><footer class="audience-branding" aria-label="Event organizers"><img class="organizer-logo school" src="/assets/school-logo.png" alt="School" width="2480" height="3038"><span class="itex-mark event-logo"><img src="/assets/itex-logo.png" alt="ITEX 2.0" width="2508" height="2508"></span><img class="organizer-logo society" src="/assets/ICTnew.png" alt="ICT Society" width="1241" height="1267"></footer>`;
+  $('displayContent').innerHTML = `<section class="audience-live ${isWinner ? 'winner-stage' : ''}"><div class="audience-topline"><span class="badge active" id="liveStatus">${isWinner ? (winners.length > 1 ? 'Shared first place' : 'Competition winner') : 'Live competition'}</span><span class="muted">ITEX 2.0 · Line following</span></div><h1>${isWinner ? winners.map(team => escapeHtml(team.name)).join('<br>') : t ? escapeHtml(t.name) : 'Ready for the next team'}</h1>${isWinner ? '<div class="winner-finish" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p class="audience-winner-caption">Congratulations to our winners</p>' : `<div class="timer audience-timer"><div class="time" id="attemptTime">${largeTime(0)}</div><p id="attemptHint">Attempt timer</p></div><div class="audience-window"><div><div class="session-label" id="sessionLabel">Run window remaining</div><div class="session-time" id="sessionTime">10:00</div></div><p id="audienceAttemptLabel">Four attempts. One course.</p></div><div class="window-track" aria-hidden="true"><div id="windowProgress"></div></div><div class="audience-attempts">${attempts}</div>`}</section><footer class="audience-branding" aria-label="Event organizers"><img class="organizer-logo school" src="/assets/school-logo.png" alt="School" width="2480" height="3038"><span class="itex-mark event-logo"><img src="/assets/itex-logo.png" alt="ITEX 2.0" width="2508" height="2508"></span><img class="organizer-logo society" src="/assets/ICTnew.png" alt="ICT Society" width="1241" height="1267"></footer>`;
   updateClock();
+}
+function shuffleLocked() { return state.teams.length < 2 || state.teams.some(t => t.attempts.length || t.session.calibrationEndsAt || t.session.runEndsAt); }
+function renderTeamDisplay() {
+  const key = JSON.stringify(['teams', state.teams.map(t => [t.id, t.name]), state.shuffledAt]);
+  if (key !== displayKey) {
+    displayKey = key;
+    const drawing = lastShuffle !== null && lastShuffle !== (state.shuffledAt || 0);
+    lastShuffle = state.shuffledAt || 0;
+    $('displayContent').classList.remove('audience-stage');
+    $('displayContent').innerHTML = `<section class="team-order-stage"><div class="page-title"><div><h1>Team running order</h1><p>${state.teams.length} teams · Follow this order for the competition.</p></div><button id="displayShuffle" class="primary">Shuffle team order</button></div><p class="order-hint" id="displayShuffleHint"></p><ol class="public-team-order ${drawing ? 'drawing' : ''}">${state.teams.map((t,i) => `<li style="--draw-index:${Math.min(i,12)}"><span>${String(i+1).padStart(2,'0')}</span><strong>${escapeHtml(t.name)}</strong></li>`).join('')}</ol></section>`;
+    $('displayShuffle').onclick = () => send('SHUFFLE_TEAMS', { rosterVersion: state.rosterVersion || 0 }, 'Running order updated on all screens.');
+  }
+  renderShuffle(); updateClock();
 }
 function updateClock() {
   window.CompetitionSound?.onClock(now(), connected);
+  if (page === 'admin' && state) {
+    const locked = state.teams.some(t => t.attempts.length || t.session.calibrationEndsAt || t.session.runEndsAt);
+    $('shuffleTeams').disabled = !connected || locked || state.teams.length < 2;
+    $('shuffleHint').textContent = locked ? 'Order is locked once calibration or competition begins.' : 'Draw the running order before calibration begins.';
+  }
+  if (page === 'display' && $('displayShuffle')) {
+    $('displayShuffle').disabled = !connected || shuffleLocked();
+    $('displayShuffleHint').textContent = shuffleLocked() ? 'Running order is locked after calibration or competition starts.' : 'Shuffle here to draw the order for everyone. Staff panels update automatically.';
+  }
+  if (page === 'coordinator' && state) {
+    const readiness = state.teams.map(t => `${t.id}:${reviewReady(t)}`).join(',');
+    if (readiness !== reviewReadiness) { reviewReadiness = readiness; renderCoordinator(); return; }
+    document.querySelectorAll('[data-score-form] button').forEach(button => button.disabled = !connected || !reviewReady(current()));
+  }
   if (!state || !$('attemptTime')) return;
   const t = current(), running = runAttempt(t), latest = t?.attempts.at(-1);
   const paused = !!t?.session.runPausedAt;
@@ -173,8 +210,40 @@ function updateClock() {
   $('announce').disabled = !connected || !state.leaderboard.length;
   $('winnerScope').textContent = `${state.leaderboard.length} of ${state.teams.length} teams have saved scores. Announce whenever you choose; only scored attempts count.`;
 }
+function renderShuffle() {
+  const reveal = $('shuffleReveal');
+  if (!reveal) return;
+  if (lastShuffle === null) { lastShuffle = state.shuffledAt || 0; return; }
+  if (lastShuffle === (state.shuffledAt || 0)) return;
+  lastShuffle = state.shuffledAt || 0;
+  if (!lastShuffle) { reveal.classList.add('hidden'); return; }
+  reveal.classList.remove('hidden');
+  reveal.innerHTML = `<div class="panel-heading"><div><h2>Drawing the running order…</h2><p>The same order is shared with competition control and coordinators.</p></div><button type="button" data-dismiss-shuffle aria-label="Dismiss running order">Close</button></div><ol class="draw-order">${state.teams.map((t, i) => `<li style="--draw-index:${Math.min(i, 12)}"><span>${i + 1}</span><strong>${escapeHtml(t.name)}</strong></li>`).join('')}</ol>`;
+  reveal.classList.remove('drawing'); void reveal.offsetWidth; reveal.classList.add('drawing');
+  reveal.querySelector('[data-dismiss-shuffle]').onclick = () => reveal.classList.add('hidden');
+  const draw = lastShuffle;
+  setTimeout(() => { if (lastShuffle === draw && reveal.querySelector('h2')) reveal.querySelector('h2').textContent = 'Running order is ready'; }, matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 1900);
+}
+function renderCoordinator() {
+  if (!state.teams.some(t => t.id === reviewTeamId)) reviewTeamId = state.currentTeamId || state.teams[0]?.id || null;
+  const pending = state.teams.reduce((sum, t) => sum + t.attempts.filter(a => a.status === 'pending').length, 0);
+  $('reviewStatus').textContent = `${state.teams.length} teams · ${pending} ${pending === 1 ? 'attempt' : 'attempts'} awaiting marks`;
+  const active = state.teams.find(t => t.id === state.currentTeamId);
+  $('activeTeam').textContent = active ? `At competition control: ${active.name}` : 'Competition control has not selected a team.';
+  $('reviewSummary').innerHTML = state.teams.length ? state.teams.map((t, i) => `<section class="review-team ${t.id === reviewTeamId ? 'review-selected' : ''}"><div class="panel-heading"><div><h2><span class="muted">${String(i + 1).padStart(2, '0')} · </span>${escapeHtml(t.name)}</h2><p>${t.id === state.currentTeamId ? 'Selected at competition control · ' : ''}${t.attempts.length}/4 attempts used${t.best ? ` · Best: Attempt ${t.best.number} · ${marks(t.best.total)} marks · ${t.best.completed ? time(t.best.time) : 'Incomplete'}` : ' · No best attempt yet'}</p></div><button data-review-team="${t.id}" aria-pressed="${t.id === reviewTeamId}">${t.id === reviewTeamId ? 'Viewing' : reviewReady(t) ? 'Review / edit' : 'View marks'}</button></div><div class="table-wrap">${t.attempts.length ? `<table><thead><tr><th>Attempt</th><th>Time</th><th class="numeric">Judge 1</th><th class="numeric">Judge 2</th><th class="numeric">Judge 3</th><th class="numeric">Bonus</th><th class="numeric">Total</th><th>Completion</th></tr></thead><tbody>${t.attempts.map(a => `<tr><td>${a.number}${t.best?.number === a.number ? ' <span class="badge best">Best</span>' : ''}</td><td>${a.status === 'running' ? 'On track' : time(a.time)}</td>${[0,1,2].map(j => `<td class="numeric">${marks(a.scores?.[j])}</td>`).join('')}<td class="numeric">${marks(a.bonus)}</td><td class="numeric"><strong>${marks(a.total)}</strong></td><td>${a.status === 'pending' ? 'Awaiting marks' : a.status === 'running' ? 'In progress' : a.completed ? 'Completed' : 'Incomplete'}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No attempts recorded yet.</p>'}</div></section>`).join('') : '<p class="empty">No teams yet. Add teams in competition control.</p>';
+  $('leaderboard').innerHTML = rankingHtml(state.leaderboard);
+  $('reviewTeamTitle').textContent = current() ? `Check marks · ${current().name}` : 'Check marks';
+  renderForm(); renderShuffle(); updateClock();
+}
+if (page === 'coordinator') {
+  $('reviewSummary').onclick = event => {
+    const button = event.target.closest('[data-review-team]'); if (!button) return;
+    reviewTeamId = Number(button.dataset.reviewTeam); renderCoordinator();
+    $('reviewEditor').scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+  };
+}
 function connect() {
-  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/?role=${page === 'display' ? 'display' : 'admin'}`);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/?role=${page}`);
   ws.onopen = () => { connected = true; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); updateClock(); };
   ws.onclose = () => {
     connected = false; $('connection').textContent = 'Offline · reconnecting'; $('connection').classList.remove('online');
@@ -183,7 +252,7 @@ function connect() {
   ws.onmessage = event => {
     const message = JSON.parse(event.data);
     if (message.type === 'CLOCK') { offset = message.serverTime - Date.now(); updateClock(); }
-    if (message.type === 'FULL_STATE') { state = message.state; window.CompetitionSound?.onState(state); offset = state.serverTime - Date.now(); page === 'admin' ? renderAdmin() : renderDisplay(); }
+    if (message.type === 'FULL_STATE') { state = message.state; window.CompetitionSound?.onState(state); offset = state.serverTime - Date.now(); page === 'admin' ? renderAdmin() : page === 'coordinator' ? renderCoordinator() : renderDisplay(); }
     if (message.type === 'ERROR' || message.type === 'SUCCESS') {
       const request = requests.get(message.requestId);
       if (request) { clearTimeout(request.timeout); requests.delete(message.requestId); }
@@ -197,17 +266,18 @@ function connect() {
   };
 }
 if (page === 'admin') {
+  $('shuffleTeams').onclick = () => send('SHUFFLE_TEAMS', { rosterVersion: state.rosterVersion || 0 }, 'Team order shuffled and shared with coordinators.');
   $('teamSearch').addEventListener('input', () => state && renderTeams());
   $('teamList').addEventListener('click', e => { const button = e.target.closest('[data-team]'); if (button) send('SET_CURRENT_TEAM', { id: Number(button.dataset.team) }, 'Team selected.'); });
   $('showAdd').onclick = () => { $('addTeamForm').classList.remove('hidden'); $('newTeamName').focus(); };
   $('cancelAdd').onclick = () => $('addTeamForm').classList.add('hidden');
-  $('addTeamForm').onsubmit = e => { e.preventDefault(); send('ADD_TEAM', { name: $('newTeamName').value.trim(), robotName: $('newRobotName').value.trim() }, 'Team added.'); };
-  $('editTeamForm').onsubmit = e => { e.preventDefault(); send('UPDATE_TEAM', { name: $('editName').value.trim(), robotName: $('editRobot').value.trim() }, 'Team details saved.'); };
+  $('addTeamForm').onsubmit = e => { e.preventDefault(); send('ADD_TEAM', { name: $('newTeamName').value.trim() }, 'Team added.'); };
+  $('editTeamForm').onsubmit = e => { e.preventDefault(); send('UPDATE_TEAM', { name: $('editName').value.trim() }, 'Team details saved.'); };
   $('removeTeam').onclick = async () => { if (current() && await confirmAction(`Remove ${current().name} and all of its attempts? This cannot be undone.`, 'Remove team')) send('REMOVE_TEAM', {}, 'Team removed.'); };
   $('resetTeam').onclick = async () => {
     const team = current(); if (!team) return;
     const expected = { teamId: team.id, generation: team.session.generation || 0, resetVersion: state.resetVersion || 0 };
-    if (await confirmAction(`Reset all attempts, marks, calibration, and run timers for ${team.name}? Its team and robot names will be kept. Any active attempt stops, and the winner announcement is cleared. This cannot be undone.`, 'Reset team data')) send('RESET_TEAM', { ...expected, confirmed: true }, 'Team data reset. Calibration and all four attempts are available again.');
+    if (await confirmAction(`Reset all attempts, marks, calibration, and run timers for ${team.name}? Its team name will be kept. Any active attempt stops, and the winner announcement is cleared. This cannot be undone.`, 'Reset team data')) send('RESET_TEAM', { ...expected, confirmed: true }, 'Team data reset. Calibration and all four attempts are available again.');
   };
   $('resetAll').onclick = async () => {
     const resetVersion = state?.resetVersion || 0;
@@ -222,17 +292,12 @@ if (page === 'admin') {
   $('endSession').onclick = async () => { if (await confirmAction('End this team’s run window early? An active attempt will stop and unused attempts will be forfeited. Saved times and marks are retained.', 'End run window')) send('END_SESSION', {}, 'Run window ended. Marks can still be entered below.'); };
   $('startAttempt').onclick = () => send('START_ATTEMPT', {}, 'Attempt started.');
   $('stopAttempt').onclick = () => send('STOP_ATTEMPT', {}, 'Time recorded. Start the next attempt whenever ready; enter marks below later.');
-  $('judgingForms').addEventListener('input', event => { const form = event.target.closest('[data-score-form]'); if (form) updateTotal(form); });
-  $('judgingForms').addEventListener('submit', event => {
-    event.preventDefault(); const form = event.target.closest('[data-score-form]'); if (!form) return;
-    const saved = form.dataset.saved === 'true';
-    send(saved ? 'EDIT_ATTEMPT' : 'SAVE_ATTEMPT', { resetVersion: Number(form.dataset.resetVersion), generation: Number(form.dataset.generation), teamId: Number(form.dataset.team), number: Number(form.dataset.scoreForm), revision: Number(form.dataset.revision), scores: [1, 2, 3].map(i => Number(form.elements[`judge${i}`].value)), completed: form.elements.completed.checked, ...(saved ? { time: Math.round(Number(form.elements.time.value) * 1000) } : {}) }, `Attempt ${form.dataset.scoreForm} marks saved.`);
-  });
   $('attempts').onclick = event => {
     const button = event.target.closest('[data-edit]'); if (!button) return;
     const form = document.querySelector(`[data-score-form="${button.dataset.edit}"]`);
     if (form) { form.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); form.elements.judge1.focus({ preventScroll: true }); }
   };
+  $('showTeams').onclick = () => send('SET_VIEW', { view: 'teams' }, 'Team list is now on the public display. Open Public display to shuffle in front of the teams.');
   $('showRules').onclick = () => send('SET_VIEW', { view: 'rules' }, 'Course map and rules are now on the public display.');
   $('showLive').onclick = () => send('SET_VIEW', { view: 'live' }, 'Live timing is now on the public display.');
   $('announce').onclick = async () => {
@@ -245,4 +310,12 @@ if (page === 'admin') {
   // Keep the initial empty state safe before the first connection arrives.
   for (const id of ['calibrate', 'startSession', 'startAttempt', 'stopAttempt', 'announce']) $(id).disabled = true;
 }
-if (page === 'admin' || page === 'display') connect();
+if (page === 'admin' || page === 'coordinator') {
+  $('judgingForms').addEventListener('input', event => { const form = event.target.closest('[data-score-form]'); if (form) updateTotal(form); });
+  $('judgingForms').addEventListener('submit', event => {
+    event.preventDefault(); const form = event.target.closest('[data-score-form]'); if (!form) return;
+    const saved = form.dataset.saved === 'true';
+    send(saved ? 'EDIT_ATTEMPT' : 'SAVE_ATTEMPT', { resetVersion: Number(form.dataset.resetVersion), generation: Number(form.dataset.generation), teamId: Number(form.dataset.team), number: Number(form.dataset.scoreForm), revision: Number(form.dataset.revision), scores: [1, 2, 3].map(i => Number(form.elements[`judge${i}`].value)), completed: form.elements.completed.checked, ...(saved ? { time: Math.round(Number(form.elements.time.value) * 1000) } : {}) }, `Attempt ${form.dataset.scoreForm} marks saved.`);
+  });
+}
+if (['admin', 'display', 'coordinator'].includes(page)) connect();
