@@ -1,3 +1,4 @@
+const { initialState, normalizeScores } = require('./competition');
 const Database = require('better-sqlite3');
 const fs = require('fs');
 const path = require('path');
@@ -23,11 +24,13 @@ function openStore(filename) {
   function load() {
     const row = db.prepare("SELECT value FROM settings WHERE key = 'competition'").get();
     if (!row) {
-      const state = { teams: Array.from({ length: 32 }, (_, i) => ({ id: i + 1, name: `Team ${i + 1}`, robotName: `Robot ${i + 1}`, session: {}, attempts: [] })), nextTeamId: 33, currentTeamId: null, view: 'live', winnerIds: [] };
+      const state = initialState();
       save(state); return state;
     }
     const attempts = db.prepare('SELECT * FROM attempts ORDER BY number').all();
-    return { ...JSON.parse(row.value), teams: db.prepare('SELECT * FROM teams ORDER BY id').all().map(t => ({ id: t.id, name: t.name, robotName: t.robot_name, session: JSON.parse(t.session), attempts: attempts.filter(a => a.team_id === t.id).map(a => JSON.parse(a.data)) })) };
+    const state = { ...JSON.parse(row.value), teams: db.prepare('SELECT * FROM teams ORDER BY id').all().map(t => ({ id: t.id, name: t.name, robotName: t.robot_name, session: JSON.parse(t.session), attempts: attempts.filter(a => a.team_id === t.id).map(a => JSON.parse(a.data)) })) };
+    if (normalizeScores(state)) save(state);
+    return state;
   }
   return { db, load, save };
 }

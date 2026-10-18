@@ -7,7 +7,8 @@
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
     "test": "node test/competition.test.js",
-    "test:integration": "node test/integration.js"
+    "test:integration": "node test/integration.js",
+    "test:audio": "node --test test/audio-cues.test.js test/audio-runtime.test.js"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const { publicState } = require('./public-state');
 const { openStore } = require('./store');
 const { apply, settle, leaderboard, bestAttempt } = require('./competition');
 const store = openStore(process.env.DB_PATH || path.join(__dirname, '../data/competition.sqlite'));
@@ -11,19 +12,22 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, maxPayload: 16384 });
 app.use(express.static(path.join(__dirname, '../public')));
-function snapshot() {
+function snapshot(readonly = false) {
+  if (readonly) return publicState(state);
   return { ...state, teams: state.teams.map(t => ({ ...t, best: bestAttempt(t) })), leaderboard: leaderboard(state.teams), serverTime: Date.now() };
 }
 function publish() {
-  const raw = JSON.stringify({ type: 'FULL_STATE', state: snapshot() });
-  for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(raw);
+  const admin = JSON.stringify({ type: 'FULL_STATE', state: snapshot() });
+  const audience = JSON.stringify({ type: 'FULL_STATE', state: snapshot(true) });
+  for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(client.readonly ? audience : admin);
 }
 app.get('/rules', (req, res) => res.sendFile(path.join(__dirname, '../public/rules.html')));
 app.get('/api/state', (req, res) => res.json(snapshot()));
 app.get('/api/export', (req, res) => res.attachment('itex-results.json').json(snapshot()));
 wss.on('connection', (ws, req) => {
   const readonly = new URL(req.url, 'http://localhost').searchParams.get('role') === 'display';
-  ws.send(JSON.stringify({ type: 'FULL_STATE', state: snapshot() }));
+  ws.readonly = readonly;
+  ws.send(JSON.stringify({ type: 'FULL_STATE', state: snapshot(readonly) }));
   ws.on('message', raw => {
     let msg;
     try {
