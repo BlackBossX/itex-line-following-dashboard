@@ -13,6 +13,7 @@ services:
       - NODE_ENV=production
     restart: unless-stopped
     volumes:
+      - itex-data:/app/data
       # Mount assets so logos can be updated without rebuild
       - ./public/assets:/app/public/assets:ro
     networks:
@@ -27,3 +28,6 @@ services:
 networks:
   itex-net:
     driver: bridge
+
+volumes:
+  itex-data:

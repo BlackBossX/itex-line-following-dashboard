@@ -2,240 +2,54 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
-
+const { openStore } = require('./store');
+const { apply, settle, leaderboard, bestAttempt } = require('./competition');
+const store = openStore(process.env.DB_PATH || path.join(__dirname, '../data/competition.sqlite'));
+let state = store.load();
+if (settle(state.teams, Date.now())) store.save(state);
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
-
-// Serve static files
+const wss = new WebSocket.Server({ server, maxPayload: 16384 });
 app.use(express.static(path.join(__dirname, '../public')));
-app.use(express.json());
-
-// --- State ---
-let state = {
-  teams: [],
-  currentTeam: null,
-  stopwatch: {
-    running: false,
-    startTime: null,
-    elapsed: 0,
-    laps: []
-  },
-  countdown: {
-    active: false,
-    seconds: 5
-  },
-  winner: null,
-  phase: 'idle' // idle | countdown | running | finished
-};
-
-// Generate default 32 teams
-for (let i = 1; i <= 32; i++) {
-  state.teams.push({
-    id: i,
-    name: `Team ${i}`,
-    robotName: `Robot ${i}`,
-    attempts: [],
-    bestTime: null,
-    penalty: 0
-  });
+function snapshot() {
+  return { ...state, teams: state.teams.map(t => ({ ...t, best: bestAttempt(t) })), leaderboard: leaderboard(state.teams), serverTime: Date.now() };
 }
-
-// --- Broadcast helper ---
-function broadcast(data) {
-  const msg = JSON.stringify(data);
-  wss.clients.forEach(client => {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(msg);
-    }
-  });
+function publish() {
+  const raw = JSON.stringify({ type: 'FULL_STATE', state: snapshot() });
+  for (const client of wss.clients) if (client.readyState === WebSocket.OPEN) client.send(raw);
 }
-
-// Stopwatch tick
-let tickInterval = null;
-function startTick() {
-  if (tickInterval) return;
-  tickInterval = setInterval(() => {
-    if (state.stopwatch.running) {
-      const now = Date.now();
-      state.stopwatch.elapsed = now - state.stopwatch.startTime;
-      broadcast({ type: 'TICK', elapsed: state.stopwatch.elapsed });
-    }
-  }, 50);
-}
-
-// --- WebSocket messages ---
-wss.on('connection', (ws) => {
-  // Send full state on connect
-  ws.send(JSON.stringify({ type: 'FULL_STATE', state }));
-
-  ws.on('message', (raw) => {
+app.get('/rules', (req, res) => res.sendFile(path.join(__dirname, '../public/rules.html')));
+app.get('/api/state', (req, res) => res.json(snapshot()));
+app.get('/api/export', (req, res) => res.attachment('itex-results.json').json(snapshot()));
+wss.on('connection', (ws, req) => {
+  const readonly = new URL(req.url, 'http://localhost').searchParams.get('role') === 'display';
+  ws.send(JSON.stringify({ type: 'FULL_STATE', state: snapshot() }));
+  ws.on('message', raw => {
     let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
-
-    switch (msg.type) {
-      case 'UPDATE_TEAM': {
-        const t = state.teams.find(t => t.id === msg.team.id);
-        if (t) { Object.assign(t, msg.team); }
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'ADD_TEAM': {
-        const newId = state.teams.length ? Math.max(...state.teams.map(t => t.id)) + 1 : 1;
-        state.teams.push({
-          id: newId,
-          name: msg.name || `Team ${newId}`,
-          robotName: msg.robotName || `Robot ${newId}`,
-          attempts: [],
-          bestTime: null,
-          penalty: 0
-        });
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'REMOVE_TEAM': {
-        state.teams = state.teams.filter(t => t.id !== msg.id);
-        if (state.currentTeam && state.currentTeam.id === msg.id) {
-          state.currentTeam = null;
-          state.phase = 'idle';
-        }
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'SET_CURRENT_TEAM': {
-        const team = state.teams.find(t => t.id === msg.id);
-        if (team) { state.currentTeam = team; }
-        state.phase = 'idle';
-        state.stopwatch = { running: false, startTime: null, elapsed: 0, laps: [] };
-        state.countdown = { active: false, seconds: 5 };
-        state.winner = null;
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'START_COUNTDOWN': {
-        if (!state.currentTeam) return;
-        state.phase = 'countdown';
-        state.countdown = { active: true, seconds: msg.seconds || 5 };
-        state.stopwatch = { running: false, startTime: null, elapsed: 0, laps: [] };
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'COUNTDOWN_TICK': {
-        state.countdown.seconds = msg.seconds;
-        broadcast({ type: 'COUNTDOWN_TICK', seconds: msg.seconds });
-        break;
-      }
-      case 'COUNTDOWN_DONE': {
-        state.phase = 'running';
-        state.countdown = { active: false, seconds: 0 };
-        state.stopwatch.running = true;
-        state.stopwatch.startTime = Date.now();
-        state.stopwatch.elapsed = 0;
-        broadcast({ type: 'FULL_STATE', state });
-        startTick();
-        break;
-      }
-      case 'STOPWATCH_START': {
-        if (!state.stopwatch.running) {
-          state.stopwatch.running = true;
-          state.stopwatch.startTime = Date.now() - state.stopwatch.elapsed;
-          state.phase = 'running';
-          broadcast({ type: 'FULL_STATE', state });
-          startTick();
-        }
-        break;
-      }
-      case 'STOPWATCH_STOP': {
-        if (state.stopwatch.running) {
-          state.stopwatch.elapsed = Date.now() - state.stopwatch.startTime;
-          state.stopwatch.running = false;
-          state.phase = 'finished';
-          if (tickInterval) { clearInterval(tickInterval); tickInterval = null; }
-          broadcast({ type: 'FULL_STATE', state });
-        }
-        break;
-      }
-      case 'STOPWATCH_RESET': {
-        state.stopwatch = { running: false, startTime: null, elapsed: 0, laps: [] };
-        state.phase = state.currentTeam ? 'idle' : 'idle';
-        if (tickInterval) { clearInterval(tickInterval); tickInterval = null; }
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'STOPWATCH_LAP': {
-        if (state.stopwatch.running) {
-          const lapTime = Date.now() - state.stopwatch.startTime;
-          state.stopwatch.laps.push(lapTime);
-          broadcast({ type: 'LAP', laps: state.stopwatch.laps });
-        }
-        break;
-      }
-      case 'SAVE_ATTEMPT': {
-        if (!state.currentTeam) return;
-        const team = state.teams.find(t => t.id === state.currentTeam.id);
-        if (!team) return;
-        const attempt = {
-          time: state.stopwatch.elapsed,
-          penalty: msg.penalty || 0,
-          adjustedTime: state.stopwatch.elapsed + (msg.penalty || 0) * 1000,
-          timestamp: Date.now()
-        };
-        team.attempts.push(attempt);
-        team.penalty = msg.penalty || 0;
-        // Best time
-        const validAttempts = team.attempts.filter(a => a.adjustedTime > 0);
-        if (validAttempts.length) {
-          team.bestTime = Math.min(...validAttempts.map(a => a.adjustedTime));
-        }
-        state.currentTeam = team;
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'ANNOUNCE_WINNER': {
-        const sorted = [...state.teams]
-          .filter(t => t.bestTime !== null)
-          .sort((a, b) => a.bestTime - b.bestTime);
-        state.winner = sorted.length ? sorted[0] : msg.team || state.currentTeam;
-        state.phase = 'winner';
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'CLEAR_WINNER': {
-        state.winner = null;
-        state.phase = 'idle';
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'SET_PENALTY': {
-        if (!state.currentTeam) return;
-        const team = state.teams.find(t => t.id === state.currentTeam.id);
-        if (team) { team.penalty = msg.penalty; state.currentTeam = team; }
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
-      case 'RESET_ALL': {
-        state.teams.forEach(t => { t.attempts = []; t.bestTime = null; t.penalty = 0; });
-        state.currentTeam = null;
-        state.stopwatch = { running: false, startTime: null, elapsed: 0, laps: [] };
-        state.countdown = { active: false, seconds: 5 };
-        state.winner = null;
-        state.phase = 'idle';
-        if (tickInterval) { clearInterval(tickInterval); tickInterval = null; }
-        broadcast({ type: 'FULL_STATE', state });
-        break;
-      }
+    try {
+      msg = JSON.parse(raw);
+      if (!msg || typeof msg !== 'object') throw new Error('Invalid action.');
+      if (readonly) throw new Error('Use the admin panel to make changes.');
+      const next = structuredClone(state);
+      settle(next.teams, Date.now()); apply(next, msg);
+      store.save(next); state = next;
+      publish(); ws.send(JSON.stringify({ type: 'SUCCESS', requestId: msg.requestId, action: msg.type }));
+    } catch (error) {
+      const known = error.code ? 'Could not save to the database. Check disk space and retry.' : error.message;
+      if (error.code) console.error(error);
+      ws.send(JSON.stringify({ type: 'ERROR', requestId: msg?.requestId, message: known }));
     }
   });
 });
-
-// REST fallback routes
-app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, '../public/admin/index.html')));
-app.get('/display', (req, res) => res.sendFile(path.join(__dirname, '../public/display/index.html')));
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
-
+const timer = setInterval(() => {
+  try {
+    const next = structuredClone(state);
+    if (settle(next.teams, Date.now())) { store.save(next); state = next; publish(); }
+    const raw = JSON.stringify({ type: 'CLOCK', serverTime: Date.now() });
+    for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.send(raw);
+  } catch (e) { console.error('Timer persistence failed:', e.message); }
+}, 100);
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 ITEX Dashboard running on port ${PORT}`);
-  console.log(`   Admin Panel : http://localhost:${PORT}/admin`);
-  console.log(`   Display Panel: http://localhost:${PORT}/display\n`);
-});
+server.listen(PORT, '0.0.0.0', () => console.log(`ITEX dashboard: http://localhost:${PORT}/admin`));
+function shutdown() { clearInterval(timer); wss.clients.forEach(c => c.close()); wss.close(); server.close(() => { store.db.close(); process.exit(0); }); }
+process.on('SIGTERM', shutdown); process.on('SIGINT', shutdown);
