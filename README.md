@@ -2,6 +2,18 @@
 
 Run `npm install` then `npm start` (Node.js 20 or newer). Open `/admin` for competition control, `/display` for the audience screen, and `/rules` for the course briefing. Both screens must use the same server address; use the server computer’s LAN address from other devices. This is a trusted-LAN event tool; the control panel has no login.
 
+## Interface Preview
+
+### Admin Control Panel (`/admin`)
+Full competition management interface for judges and operators: team selection, run window and calibration timing, attempt records, judges' score inputs, live standings, and winner announcements.
+
+![Admin Control Panel](public/assets/UI_Admin.png)
+
+### Public Audience Display (`/display`)
+Live audience-facing screen designed for stage projection: shows active team details, real-time attempt countdown, attempt history, competition course layout, and sponsor branding.
+
+![Public Audience Display](public/assets/UI_Display.png)
+
 ## Competition workflow
 
 1. Select a team. Rename the placeholder team and robot as needed, or add another team.
