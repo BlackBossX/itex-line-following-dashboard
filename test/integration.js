@@ -55,6 +55,19 @@ async function state() { return (await fetch('http://localhost:3003/api/state'))
     assert.equal((await send(lockedDisplay, 'SHUFFLE_TEAMS', { rosterVersion: 2 })).type, 'ERROR');
     lockedDisplay.close();
     const recorded = await state(); assert.equal(recorded.leaderboard[0].best.total, 250);
+    const rankingsDisplay = await client('display');
+    const rankingsUpdate = new Promise(resolve => {
+      const listener = raw => { const msg = JSON.parse(raw); if (msg.type === 'FULL_STATE' && msg.state.view === 'rankings') { rankingsDisplay.off('message', listener); resolve(msg.state); } };
+      rankingsDisplay.on('message', listener);
+    });
+    assert.equal((await send(ws, 'SET_VIEW', { view: 'rankings' })).type, 'SUCCESS');
+    const publishedRankings = await rankingsUpdate;
+    assert.equal(publishedRankings.leaderboard[0].best.total, 250);
+    assert.equal(publishedRankings.leaderboard[0].rank, 1);
+    assert.doesNotMatch(JSON.stringify(publishedRankings), /"(scores|judgeTotal|bonus)"/);
+    assert.equal((await send(rankingsDisplay, 'SET_VIEW', { view: 'live' })).type, 'ERROR');
+    rankingsDisplay.close();
+
     assert.equal((await send(ws, 'SAVE_ATTEMPT', { teamId: 1, number: 1, revision: 0, scores: [99, 99, 99], completed: true })).type, 'ERROR');
     assert.equal((await send(ws, 'ANNOUNCE_WINNER')).type, 'SUCCESS');
     assert.deepEqual((await state()).winnerIds, [1]);

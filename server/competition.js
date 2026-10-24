@@ -18,6 +18,12 @@ function normalizeScores(state) {
     }
   }
   if (resultsChanged) { state.winnerIds = []; if (state.view === 'winner') state.view = 'live'; }
+  if (state.view === 'winner') {
+    const winners = leaderboard(state.teams).filter(t => t.rank === 1).map(t => t.id);
+    if (JSON.stringify(winners) !== JSON.stringify(state.winnerIds)) {
+      state.winnerIds = []; state.view = 'live'; changed = true;
+    }
+  }
   return changed;
 }
 function initialState() {
@@ -28,11 +34,11 @@ function resetTeam(team) {
   team.attempts = [];
 }
 function bestAttempt(team) {
-  return team.attempts.filter(a => a.scores !== null).sort((a, b) => b.total - a.total || (a.completed ? a.time : Infinity) - (b.completed ? b.time : Infinity))[0] || null;
+  return team.attempts.filter(a => a.scores !== null).sort((a, b) => b.total - a.total || a.time - b.time)[0] || null;
 }
 function leaderboard(teams) {
   const rows = teams.map(team => ({ ...team, best: bestAttempt(team) })).filter(t => t.best);
-  const time = t => t.best.completed ? t.best.time : Infinity;
+  const time = t => t.best.time;
   rows.sort((a, b) => b.best.total - a.best.total || time(a) - time(b) || a.id - b.id);
   rows.forEach((t, i) => { t.rank = i && t.best.total === rows[i - 1].best.total && time(t) === time(rows[i - 1]) ? rows[i - 1].rank : i + 1; });
   return rows;
@@ -163,10 +169,10 @@ function apply(state, msg, now = Date.now(), coordinator = false) {
       a.completed = msg.completed; a.status = 'scored'; a.revision++; a.updatedAt = now; break;
     }
     case 'SET_VIEW':
-      requireCondition(['live', 'rules', 'teams'].includes(msg.view), 'Unknown display view.'); state.view = msg.view; state.winnerIds = []; break;
+      requireCondition(['live', 'rules', 'teams', 'rankings'].includes(msg.view), 'Unknown display view.'); state.view = msg.view; state.winnerIds = []; break;
     case 'ANNOUNCE_WINNER': {
       const rows = leaderboard(teams); requireCondition(rows.length, 'Save at least one scored attempt first.');
-      state.winnerIds = rows.filter(t => t.rank === 1).map(t => t.id); state.view = 'winner'; break;
+      state.winnerIds = rows.filter(t => t.rank === 1).map(t => t.id); state.view = 'winner'; state.announcementVersion = (state.announcementVersion || 0) + 1; break;
     }
     default: throw new Error('Unknown action. Reload the dashboard and try again.');
   }

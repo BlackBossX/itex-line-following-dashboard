@@ -151,7 +151,11 @@ Header links use muted text; hover and `aria-current` use the main text color. N
 
 ### Timers and draw reveal
 
-Timers dominate the timing panel; milliseconds are smaller and muted. Pause and countdown warning states change color. Shuffle reveals server-confirmed team order with staggered (1.45s) card motion; reduced motion removes the animation. Audience stage entrance, recorded-time emphasis and winner effects likewise have reduced-motion handling.
+Timers dominate the timing panel; milliseconds are smaller and muted. Keep timing numerals stable: the decorative track moves only during an active running attempt, while paused timing freezes the track and uses gold with explicit paused status and attempt labels. Recorded times receive finite emphasis; the final ten seconds retain warning cues.
+
+The audience draw rolls names, then locks each position in the server-confirmed order within 2.4 seconds, with optional tick, lock and completion sounds. A winner announcement gives the team names a gold first-place device, finite entrance motion and a confetti burst capped at (90 particles / 3.5s). The winner visuals repeat every seven seconds while the screen is visible; the fanfare plays only once per announcement. Only confetti and the first-place accent repeat; the winner name stays readable after its initial reveal. There is no manual celebration button. A new announcement can celebrate the same winner again; clock ticks and ordinary score broadcasts do not replay it.
+
+Event sound requires explicit enablement and can be muted on each screen. Hidden tabs cancel decorative work and scheduled voices. Reduced motion shows the final draw order immediately, removes confetti and spatial motion, and preserves all timing, result and status information. Preserve user-managed display typography, palette and logo settings. The audience treatment uses CSS, inline SVG, canvas and synthesized sound; no new shipping raster artwork was created.
 
 ## Do's and Don'ts
 

@@ -16,6 +16,7 @@
     };
   }
   function transition(previous, next) {
+    if (next.view === 'winner' && next.winnerIds?.length && (previous.view !== 'winner' || previous.announcementVersion !== next.announcementVersion || JSON.stringify(previous.winnerIds) !== JSON.stringify(next.winnerIds))) return 'winner';
     const before = selected(previous), after = selected(next);
     if (!before || !after || before.id !== after.id || (previous.resetVersion || 0) !== (next.resetVersion || 0) || (before.session.generation || 0) !== (after.session.generation || 0)) return null;
     const a = before.session, b = after.session;

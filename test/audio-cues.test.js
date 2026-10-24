@@ -33,3 +33,12 @@ test('team/reset changes and ordinary judging updates do not play action sounds'
   const reset = change(state, 'RESET_TEAM', 2000, { confirmed: true }); assert.equal(transition(state, reset), null);
   assert.notEqual(timerInfo(state, 2000)?.key, timerInfo(reset, 2000)?.key);
 });
+
+test('winner announcement plays once per announcement, including when no team is selected', () => {
+  const before = fresh(); before.currentTeamId = null;
+  const winner = { ...structuredClone(before), view: 'winner', winnerIds: [1], announcementVersion: 1 };
+  assert.equal(transition(before, winner), 'winner');
+  assert.equal(transition(winner, structuredClone(winner)), null);
+  assert.equal(transition(winner, { ...winner, announcementVersion: 2 }), 'winner');
+  assert.equal(transition(winner, { ...winner, view: 'live' }), null);
+});

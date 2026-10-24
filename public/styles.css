@@ -114,3 +114,28 @@ body.timer-warning .window-track>div{background:#ff9b9b}
 @media(max-width:760px){.public-team-order{grid-template-columns:minmax(0,1fr)}.public-team-order li{padding:20px 0;gap:20px}.team-order-stage .page-title button{width:100%}.team-order-stage{padding-top:0}.review-team .badge.best{display:block;width:max-content}}
 .public-team-order.drawing li{animation:draw-team 1.45s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(var(--draw-index) * 30ms)}
 @media(prefers-reduced-motion:reduce){.public-team-order.drawing li{animation:none}}
+
+/* Score-based places share the server's standings, including exact ties. */
+.winner-places{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+.winner-position{min-width:0;padding:18px 0;border-top:1px solid var(--border)}
+.winner-position-label{font-size:1.05rem;font-weight:600;color:var(--text)}
+.place-1{border-top-color:var(--gold)}
+.place-1 .winner-position-label,.place-1 .winner-marks{color:var(--gold)}
+.place-2 .winner-position-label{color:var(--accent)}
+.winner-entry{margin-top:16px}
+.winner-entry h3{font-size:1.15rem;overflow-wrap:anywhere}
+.winner-entry small{display:block;margin-top:5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.winner-marks{font-size:1.8rem;line-height:1.3;margin-top:8px;color:var(--text);font-variant-numeric:tabular-nums}
+.winner-marks span{font-size:.8rem;color:var(--muted)}
+.winner-vacant{font-size:.85rem;margin-top:16px}
+.remaining-title{font-size:.95rem;margin:12px 0 4px}
+.remaining-rankings .rank-number{width:30px}
+@media(max-width:760px){.winner-places{grid-template-columns:1fr;gap:0}.winner-position{padding:18px 0}.winner-entry{margin-top:10px}}
+
+.rankings-stage{padding:10px 0 24px}
+.rankings-stage .winner-position-label{font-size:1.4rem}
+.rankings-stage .winner-entry h3{font-size:clamp(1.3rem,2.5vw,2.4rem)}
+.rankings-stage .winner-marks{font-size:clamp(2rem,4vw,3.5rem)}
+.rankings-stage .winner-entry small,.rankings-stage .rank-name strong{font-size:1rem}
+.rankings-stage .remaining-rankings li{padding:18px 0}
+@media(max-width:760px){.winners-panel>.panel-heading{flex-wrap:wrap}.winners-panel .toolbar{flex-wrap:wrap}.rankings-stage{padding-top:0}}

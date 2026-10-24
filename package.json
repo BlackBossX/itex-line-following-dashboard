@@ -8,6 +8,7 @@
     "dev": "nodemon server/index.js",
     "test": "node test/competition.test.js",
     "test:integration": "node test/integration.js",
+    "test:stage": "node --test test/display-stage.test.js",
     "test:audio": "node --test test/audio-cues.test.js test/audio-runtime.test.js"
   },
   "dependencies": {

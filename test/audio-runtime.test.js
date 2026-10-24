@@ -39,3 +39,23 @@ test('expiry plays one finish cue; hidden screens and disconnected screens stay 
   env.notes.length = 0; env.document.visibilityState = 'hidden'; env.sound.onClock(6000, true); assert.equal(env.notes.length, 0);
   env.sound.onClock(6000, false); assert.equal(env.classes['timer-warning'], false);
 });
+
+test('winner fanfare and draw sounds respect enable, mute and hidden-tab preferences', async () => {
+  const env = setup();
+  env.sound.celebrate(); assert.equal(env.notes.length, 0);
+  await env.click(); env.notes.length = 0;
+  env.sound.celebrate(); assert.equal(env.notes.length, 12);
+  assert.ok(env.notes.includes(1046.5));
+  env.notes.length = 0; env.sound.play('drawTick'); env.sound.play('drawLock'); env.sound.play('drawFinish');
+  assert.equal(env.notes.length, 6);
+  await env.click(); env.notes.length = 0; env.sound.celebrate(); assert.equal(env.notes.length, 0);
+  await env.click(); env.notes.length = 0; env.document.visibilityState = 'hidden';
+  env.sound.celebrate(); env.sound.play('drawFinish'); assert.equal(env.notes.length, 0);
+});
+test('state refreshes do not repeat the winner fanfare; a new announcement does', async () => {
+  const env = setup(); await env.click(); env.sound.onState(state()); env.notes.length = 0;
+  const winner = { ...state(), view: 'winner', winnerIds: [1], announcementVersion: 1 };
+  env.sound.onState(winner); assert.equal(env.notes.length, 12);
+  env.sound.onState(structuredClone(winner)); assert.equal(env.notes.length, 12);
+  env.sound.onState({ ...winner, announcementVersion: 2 }); assert.equal(env.notes.length, 24);
+});

@@ -58,10 +58,13 @@ test('highest combined score wins; faster lower-scoring attempts do not affect t
   attempt(s, [20, 20, 20], 15000, start + WINDOW_MS + 1000);
   assert.equal(bestAttempt(s.teams[0]).time, 20000);
   assert.equal(leaderboard(s.teams)[0].id, 2);
+  apply(s, { type: 'ANNOUNCE_WINNER' }, start + WINDOW_MS + 19000);
+  assert.deepEqual(s.winnerIds, [2], 'Only the faster team wins when scores match');
+  assert.equal(s.view, 'winner');
   apply(s, { type: 'EDIT_ATTEMPT', number: 1, revision: 1, scores: [19, 20, 20], completed: true, time: 15000 }, start + WINDOW_MS + 20000);
   assert.equal(leaderboard(s.teams)[0].id, 1);
 });
-test('fastest at maximum score is selected; exact ties share first; incomplete time cannot win a tie', () => {
+test('fastest at maximum score is selected; exact score-and-time ties share first', () => {
   const s = fresh(); apply(s, { type: 'START_SESSION' }, start);
   attempt(s, [1, 2, 3], 20000); attempt(s, [1, 2, 3], 10000, start + 40000);
   apply(s, { type: 'SET_CURRENT_TEAM', id: 2 }, start + WINDOW_MS + 1);
@@ -338,4 +341,35 @@ test('coordinator review unlocks after four marked attempts or expiry, and reset
   assert.equal(reviewReady(s.teams[0], start + 22000), false);
   apply(s, { type: 'START_SESSION' }, start + 23000); attempt(s, [1,2,3], 1000, start + 24000);
   assert.equal(reviewReady(s.teams[0], start + 23000 + WINDOW_MS), true);
+});
+
+test('rankings view publishes aggregate places only when selected and follows score corrections', () => {
+  const { publicState } = require('../server/public-state');
+  const s = fresh(); apply(s, { type: 'START_SESSION' }, start); attempt(s, [91, 92, 93]);
+  assert.equal(publicState(s).leaderboard, undefined);
+  apply(s, { type: 'SET_VIEW', view: 'rankings' }, start + 50000);
+  let audience = publicState(s);
+  assert.equal(audience.view, 'rankings');
+  assert.deepEqual(audience.leaderboard.map(t => [t.id, t.rank, t.best.total]), [[1, 1, 376]]);
+  assert.doesNotMatch(JSON.stringify(audience), /"(scores|judgeTotal|bonus|revision)"/);
+  apply(s, { type: 'EDIT_ATTEMPT', number: 1, revision: 1, scores: [1, 2, 3], completed: false, time: 10000 }, start + 50001);
+  assert.equal(publicState(s).leaderboard[0].best.total, 6);
+  apply(s, { type: 'SET_VIEW', view: 'live' }, start + 50002);
+  assert.equal(publicState(s).leaderboard, undefined);
+  assert.throws(() => apply(s, { type: 'SET_VIEW', view: 'invalid' }), /Unknown display/);
+});
+
+test('equal scores use recorded time for incomplete attempts and announce only the fastest team', () => {
+  const s = fresh();
+  s.teams[0].attempts = [20000, 8000].map((time, i) => ({ number: i + 1, status: 'scored', scores: [50, 50, 50], total: 150, completed: false, time }));
+  s.teams[1].attempts = [{ number: 1, status: 'scored', scores: [50, 50, 50], total: 150, completed: false, time: 5000 }];
+  assert.equal(bestAttempt(s.teams[0]).time, 8000);
+  assert.deepEqual(leaderboard(s.teams).map(t => [t.id, t.rank]), [[2, 1], [1, 2]]);
+  apply(s, { type: 'ANNOUNCE_WINNER' }, start);
+  assert.deepEqual(s.winnerIds, [2]);
+  s.winnerIds = [1, 2];
+  const { normalizeScores } = require('../server/competition');
+  assert.equal(normalizeScores(s), true);
+  assert.equal(s.view, 'live');
+  assert.deepEqual(s.winnerIds, []);
 });

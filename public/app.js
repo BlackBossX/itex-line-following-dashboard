@@ -10,7 +10,7 @@ function time(ms, fraction = true) {
 }
 function largeTime(ms) { const [main, fraction] = time(ms).split('.'); return `${main}<span>.${fraction}</span>`; }
 function briefing() {
-  return `<div class="page-title"><div><h1>Course map & competition rules</h1><p>ITEX 2.0 · Line following robot competition</p></div><a class="button" href="/assets/competition-map.jpg" target="_blank" rel="noopener">Open full map</a></div><div class="brief-grid"><figure style="margin:0"><img class="map-image" src="/assets/competition-map.jpg" width="2000" height="1414" alt="ITEX line following course map: five numbered sections with straights, curves, right-angle turns and an angled path, between two square pads."><figcaption class="map-caption"><span>Competition course · Five path sections</span><span>Reference map</span></figcaption></figure><div><section class="rule"><h2>Calibration · 2 minutes</h2><p>Teams may take <strong>up to 2 minutes of calibration</strong> if needed, before their run window begins. Calibration is optional and separate from run time.</p></section><section class="rule"><h2>Run window · 10 minutes</h2><p>Each team receives <strong>one 10-minute run window</strong> with a maximum of <strong>4 attempts</strong>. The window continues between attempts unless paused by the judge.</p></section><section class="rule"><h2>Three judges, one attempt score</h2><p>Each judge gives a total for the attempt. The three judges’ totals are added together. Completing the <strong>entire challenge earns a 100-mark bonus</strong>, added once per attempt. The combined score is <strong>Judge 1 + Judge 2 + Judge 3 + completion bonus</strong>. Time and each judge’s total are recorded for every attempt.</p></section><section class="rule"><h2>How the winner is decided</h2><p>A team’s <strong>highest combined attempt score</strong> determines its position. If teams tie, the <strong>fastest completion time at that score</strong> ranks first. An exact score-and-time tie remains shared.</p></section></div></div><p class="brief-footer">The course’s five sections are shown for briefing. Record each judge’s total and confirm full-course completion in competition control to award the 100-mark bonus.</p>`;
+  return `<div class="page-title"><div><h1>Course map & competition rules</h1><p>ITEX 2.0 · Line following robot competition</p></div><a class="button" href="/assets/competition-map.jpg" target="_blank" rel="noopener">Open full map</a></div><div class="brief-grid"><figure style="margin:0"><img class="map-image" src="/assets/competition-map.jpg" width="2000" height="1414" alt="ITEX line following course map: five numbered sections with straights, curves, right-angle turns and an angled path, between two square pads."><figcaption class="map-caption"><span>Competition course · Five path sections</span><span>Reference map</span></figcaption></figure><div><section class="rule"><h2>Calibration · 2 minutes</h2><p>Teams may take <strong>up to 2 minutes of calibration</strong> if needed, before their run window begins. Calibration is optional and separate from run time.</p></section><section class="rule"><h2>Run window · 10 minutes</h2><p>Each team receives <strong>one 10-minute run window</strong> with a maximum of <strong>4 attempts</strong>. The window continues between attempts unless paused by the judge.</p></section><section class="rule"><h2>Three judges, one attempt score</h2><p>Each judge gives a total for the attempt. The three judges’ totals are added together. Completing the <strong>entire challenge earns a 100-mark bonus</strong>, added once per attempt. The combined score is <strong>Judge 1 + Judge 2 + Judge 3 + completion bonus</strong>. Time and each judge’s total are recorded for every attempt.</p></section><section class="rule"><h2>How the winner is decided</h2><p>A team’s <strong>highest combined attempt score</strong> determines its position. If teams tie, the <strong>fastest recorded time at that score</strong> ranks first. An exact score-and-time tie remains shared.</p></section></div></div><p class="brief-footer">The course’s five sections are shown for briefing. Record each judge’s total and confirm full-course completion in competition control to award the 100-mark bonus.</p>`;
 }
 if (page === 'rules') $('brief').innerHTML = briefing();
 let state = null, ws, offset = 0, connected = false, toastTimer;
@@ -76,7 +76,23 @@ function session(t) {
 }
 function rankingHtml(rows, limit) {
   if (!rows?.length) return '<li class="empty">Standings appear after the first scored attempt.</li>';
-  return rows.slice(0, limit || rows.length).map(t => `<li><span class="rank-number">${t.rank}</span><div class="rank-name"><strong>${escapeHtml(t.name)}</strong><small>Attempt ${t.best.number}</small></div><div class="rank-score">${marks(t.best.total)}<small>${t.best.completed ? time(t.best.time) : 'Incomplete'}</small></div></li>`).join('');
+  return rows.slice(0, limit || rows.length).map(t => `<li><span class="rank-number">${t.rank}</span><div class="rank-name"><strong>${escapeHtml(t.name)}</strong><small>Attempt ${t.best.number}</small></div><div class="rank-score">${marks(t.best.total)}<small>${time(t.best.time)}${t.best.completed ? '' : ' · Incomplete'}</small></div></li>`).join('');
+}
+function renderWinners(topThreeOnly = false) {
+  const rows = state.leaderboard || [];
+  $('winnersStatus').textContent = `${rows.length} / ${state.teams.length} teams scored`;
+  if (!rows.length) {
+    $('winnersResults').innerHTML = '<p class="empty">No scored attempts yet. Save judges’ marks to reveal first, second and third place.</p>';
+    return;
+  }
+  const places = [1, 2, 3].map(rank => {
+    const teams = rows.filter(team => team.rank === rank);
+    const label = ['1st place', '2nd place', '3rd place'][rank - 1];
+    return `<div class="winner-position place-${rank}"><span class="winner-position-label">${label}${teams.length > 1 ? ' · Shared' : ''}</span>${teams.length ? teams.map(team => `<div class="winner-entry"><h3>${escapeHtml(team.name)}</h3><p class="winner-marks">${marks(team.best.total)} <span>marks</span></p><small>Attempt ${team.best.number} · ${time(team.best.time)}${team.best.completed ? '' : ' · Incomplete'}</small></div>`).join('') : `<p class="winner-vacant">${rows.some(team => team.rank > rank) ? 'No team at this place · Shared ranking' : 'Awaiting scores'}</p>`}</div>`;
+  }).join('');
+  const remaining = topThreeOnly ? [] : rows.filter(team => team.rank > 3);
+  const unscored = state.teams.length - rows.length;
+  $('winnersResults').innerHTML = `<div class="winner-places">${places}</div>${remaining.length ? `<h3 class="remaining-title">Remaining places</h3><ol class="rank-list remaining-rankings" start="${remaining[0].rank}">${rankingHtml(remaining)}</ol>` : ''}${unscored ? `<p class="note">${unscored} ${unscored === 1 ? 'team has' : 'teams have'} no saved scores yet and ${unscored === 1 ? 'is' : 'are'} unranked.</p>` : ''}`;
 }
 function renderTeams() {
   const query = $('teamSearch').value.trim().toLowerCase();
@@ -118,18 +134,22 @@ function renderAdmin() {
   $('attemptCount').textContent = `${t?.attempts.length || 0} / 4 used`;
   $('attempts').innerHTML = t?.attempts.length ? `<table><thead><tr><th>Attempt</th><th>Time</th><th class="numeric">Judge 1</th><th class="numeric">Judge 2</th><th class="numeric">Judge 3</th><th class="numeric">Bonus</th><th class="numeric">Combined</th><th></th></tr></thead><tbody>${t.attempts.map(a => `<tr><td><strong>${a.number}</strong>${t.best?.number === a.number ? ' <span class="badge best">Best</span>' : ''}</td><td>${a.status === 'running' ? 'Running' : time(a.time)}<small>${a.status === 'pending' ? 'Awaiting scores' : a.status === 'scored' && !a.completed ? 'Incomplete' : ''}</small></td>${[0, 1, 2].map(i => `<td class="numeric">${marks(a.scores?.[i])}</td>`).join('')}<td class="numeric">${marks(a.bonus)}</td><td class="numeric"><strong>${marks(a.total)}</strong></td><td>${a.status !== 'running' ? `<button class="text-button" data-edit="${a.number}" aria-label="${a.status === 'scored' ? 'Edit' : 'Score'} attempt ${a.number}">${a.status === 'scored' ? 'Edit' : 'Enter marks'}</button>` : ''}</td></tr>`).join('')}</tbody></table>` : `<p class="empty">${t ? 'No attempts recorded. Start the team’s run window when ready.' : 'Select a team to view its attempts.'}</p>`;
   $('leaderboard').innerHTML = rankingHtml(state.leaderboard);
-  $('displayMode').textContent = `Public display: ${state.view === 'teams' ? 'team list & running order' : state.view === 'rules' ? 'course map & rules' : state.view === 'winner' ? 'results announcement' : 'live timing'}.`;
+  renderWinners();
+  $('displayMode').textContent = `Public display: ${state.view === 'rankings' ? 'winners & rankings' : state.view === 'teams' ? 'team list & running order' : state.view === 'rules' ? 'course map & rules' : state.view === 'winner' ? 'results announcement' : 'live timing'}.`;
   if (document.activeElement !== $('editName')) $('editName').value = t?.name || '';
   $('teamDetails').classList.toggle('hidden', !t);
   renderForm(); renderShuffle(); updateClock();
 }
 function renderDisplay() {
   if (state.view === 'teams') { renderTeamDisplay(); return; }
+  if (state.view === 'rankings') { renderRankingsDisplay(); return; }
   const t = current();
-  const key = JSON.stringify([state.view, state.currentTeamId, state.winnerIds, t?.name, t?.attempts.map(a => [a.number, a.status, a.time])]);
+  const key = state.view === 'winner' ? JSON.stringify(['winner', state.announcementVersion, state.teams.filter(t => state.winnerIds.includes(t.id)).map(t => [t.id, t.name])]) : JSON.stringify([state.view, state.currentTeamId, t?.name, t?.attempts.map(a => [a.number, a.status, a.time])]);
   // Clock ticks and score-only changes never restart the entrance animation.
   if (key === displayKey) { updateClock(); return; }
   displayKey = key;
+  window.ITEXStage?.reset();
+  $('displayContent').classList.remove('is-running', 'is-paused');
   if (state.view === 'rules') { $('displayContent').classList.remove('audience-stage'); $('displayContent').innerHTML = briefing(); return; }
   $('displayContent').classList.add('audience-stage');
   const winners = state.teams.filter(team => state.winnerIds.includes(team.id));
@@ -138,31 +158,52 @@ function renderDisplay() {
     const a = t?.attempts.find(a => a.number === i + 1);
     return `<div class="audience-attempt ${a?.status === 'running' ? 'on-track' : a ? 'recorded' : ''}"><span>Attempt ${i + 1}</span><strong ${a?.status === 'running' ? 'id="liveAttemptTime"' : ''}>${a?.status === 'running' ? time(0) : a ? time(a.time) : '—'}</strong><small>${a?.status === 'running' ? 'On track' : a ? 'Time recorded' : 'Up next'}</small></div>`;
   }).join('');
-  $('displayContent').innerHTML = `<section class="audience-live ${isWinner ? 'winner-stage' : ''}"><div class="audience-topline"><span class="badge active" id="liveStatus">${isWinner ? (winners.length > 1 ? 'Shared first place' : 'Competition winner') : 'Live competition'}</span><span class="muted">ITEX 2.0 · Line following</span></div><h1>${isWinner ? winners.map(team => escapeHtml(team.name)).join('<br>') : t ? escapeHtml(t.name) : 'Ready for the next team'}</h1>${isWinner ? '<div class="winner-finish" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><p class="audience-winner-caption">Congratulations to our winners</p>' : `<div class="timer audience-timer"><div class="time" id="attemptTime">${largeTime(0)}</div><p id="attemptHint">Attempt timer</p></div><div class="audience-window"><div><div class="session-label" id="sessionLabel">Run window remaining</div><div class="session-time" id="sessionTime">10:00</div></div><p id="audienceAttemptLabel">Four attempts. One course.</p></div><div class="window-track" aria-hidden="true"><div id="windowProgress"></div></div><div class="audience-attempts">${attempts}</div>`}</section><footer class="audience-branding" aria-label="Event organizers"><img class="organizer-logo school" src="/assets/school-logo.png" alt="School" width="2480" height="3038"><span class="itex-mark event-logo"><img src="/assets/itex-logo.png" alt="ITEX 2.0" width="2508" height="2508"></span><img class="organizer-logo society" src="/assets/ICTnew.png" alt="ICT Society" width="1241" height="1267"></footer>`;
+  const track = `<svg class="stage-track" viewBox="0 0 1000 560" fill="none" preserveAspectRatio="none" aria-hidden="true"><path d="M-40 475H170Q230 475 230 415V175Q230 100 310 100H700Q780 100 780 175V385Q780 450 850 450H1040"/><path d="M-40 505H170Q260 505 260 415V175Q260 130 310 130H700Q750 130 750 175V385Q750 480 850 480H1040"/></svg>`;
+  $('displayContent').innerHTML = `<section class="audience-live ${isWinner ? 'winner-stage' : 'timing-stage'}">${track}${isWinner ? `<canvas class="stage-confetti" aria-hidden="true"></canvas><div class="winner-place" aria-label="First place"><span>1</span><svg viewBox="0 0 160 160" fill="none" aria-hidden="true"><path d="M43 130A64 64 0 1 1 117 130"/><path d="M49 143H111"/></svg></div><h1>${winners.map(team => escapeHtml(team.name)).join('<br>')}</h1><p class="winner-caption">${winners.length > 1 ? 'Shared first place. A finish worth celebrating.' : 'Competition winner. A finish worth celebrating.'}</p><div class="winner-actions"><span class="winner-sound-note">Enable sound for the winner fanfare</span></div>` : `<div class="audience-topline"><span class="badge active" id="liveStatus">Live competition</span><span class="muted">ITEX 2.0 · Line following</span></div><h1>${t ? escapeHtml(t.name) : 'Ready for the next team'}</h1><div class="timer audience-timer"><div class="time" id="attemptTime">${largeTime(0)}</div><p id="attemptHint">Attempt timer</p></div><div class="audience-window"><div><div class="session-label" id="sessionLabel">Run window remaining</div><div class="session-time" id="sessionTime">10:00</div></div><p id="audienceAttemptLabel">Four attempts. One course.</p></div><div class="window-track" aria-hidden="true"><div id="windowProgress"></div><span class="track-marker"></span></div><div class="audience-attempts">${attempts}</div>`}</section><footer class="audience-branding" aria-label="Event organizers"><img class="organizer-logo school" src="/assets/school-logo.png" alt="School" width="2480" height="3038"><span class="itex-mark event-logo"><img src="/assets/itex-logo.png" alt="ITEX 2.0" width="2508" height="2508"></span><img class="organizer-logo society" src="/assets/ICTnew.png" alt="ICT Society" width="1241" height="1267"></footer>`;
+  if (isWinner) {
+    const root = document.querySelector('.winner-stage');
+    window.ITEXStage?.celebrate(root);
+  }
   updateClock();
+}
+function renderRankingsDisplay() {
+  const key = JSON.stringify(['rankings', state.leaderboard, state.teams.length]);
+  if (key === displayKey) return;
+  displayKey = key;
+  window.ITEXStage?.reset();
+  $('displayContent').classList.remove('is-running', 'is-paused');
+  $('displayContent').classList.add('audience-stage');
+  $('displayContent').innerHTML = `<section class="rankings-stage" aria-labelledby="winnersTitle"><div class="page-title"><div><h1 id="winnersTitle">Scores &amp; places</h1><p>ITEX 2.0 · Top three places · Score first, fastest recorded time breaks ties</p></div><span class="badge" id="winnersStatus"></span></div><div id="winnersResults"></div><p class="note">Highest combined score wins. Equal scores use the fastest recorded time; exact ties share a place. Standings update as marks are saved.</p></section>`;
+  renderWinners(true);
 }
 function shuffleLocked() { return state.teams.length < 2 || state.teams.some(t => t.attempts.length || t.session.calibrationEndsAt || t.session.runEndsAt); }
 function renderTeamDisplay() {
   const key = JSON.stringify(['teams', state.teams.map(t => [t.id, t.name]), state.shuffledAt]);
   if (key !== displayKey) {
     displayKey = key;
-    const drawing = lastShuffle !== null && lastShuffle !== (state.shuffledAt || 0);
+    window.ITEXStage?.reset();
+    $('displayContent').classList.remove('is-running', 'is-paused');
+    const drawing = !!state.shuffledAt && lastShuffle !== null && lastShuffle !== state.shuffledAt;
     lastShuffle = state.shuffledAt || 0;
     $('displayContent').classList.remove('audience-stage');
-    $('displayContent').innerHTML = `<section class="team-order-stage"><div class="page-title"><div><h1>Team running order</h1><p>${state.teams.length} teams · Follow this order for the competition.</p></div><button id="displayShuffle" class="primary">Shuffle team order</button></div><p class="order-hint" id="displayShuffleHint"></p><ol class="public-team-order ${drawing ? 'drawing' : ''}">${state.teams.map((t,i) => `<li style="--draw-index:${Math.min(i,12)}"><span>${String(i+1).padStart(2,'0')}</span><strong>${escapeHtml(t.name)}</strong></li>`).join('')}</ol></section>`;
+    $('displayContent').innerHTML = `<section class="team-order-stage" data-drawing="false"><div class="page-title"><div><h1>The running order.</h1><p>${state.teams.length} teams. One track. Your place on the starting line.</p></div><button id="displayShuffle" class="primary"><svg class="shuffle-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 6h3c5 0 7 12 12 12h3m-4-4 4 4-4 4M3 18h3c2 0 3.5-2 5-5m2-3c1.5-2.5 3-4 5-4h3m-4-4 4 4-4 4"/></svg><span>Shuffle team order</span></button></div><div class="draw-status-line"><p data-draw-status role="status">${state.shuffledAt ? 'Running order confirmed' : 'Ready for the draw'}</p><span>${String(state.teams.length).padStart(2,'0')} teams</span></div><ol class="public-team-order">${state.teams.map((t,i) => `<li data-draw-row class="${state.shuffledAt ? 'is-locked' : ''}" style="--draw-index:${Math.min(i,12)}"><span class="draw-position">${String(i+1).padStart(2,'0')}</span><strong data-draw-name>${escapeHtml(t.name)}</strong><span class="draw-lock" data-lock>${state.shuffledAt ? 'Locked' : 'Ready'}</span></li>`).join('')}</ol><div class="draw-footer"><p class="order-hint" id="displayShuffleHint"></p><span class="draw-seal" aria-hidden="true">ITEX 2.0<br>LINE FOLLOWING</span></div></section>`;
     $('displayShuffle').onclick = () => send('SHUFFLE_TEAMS', { rosterVersion: state.rosterVersion || 0 }, 'Running order updated on all screens.');
+    if (drawing) window.ITEXStage?.draw(document.querySelector('.team-order-stage'), state.teams.map(t => t.name));
   }
   renderShuffle(); updateClock();
 }
 function updateClock() {
   window.CompetitionSound?.onClock(now(), connected);
+  if (page === 'admin') $('showRankings').disabled = !connected || !state?.leaderboard.length;
   if (page === 'admin' && state) {
     const locked = state.teams.some(t => t.attempts.length || t.session.calibrationEndsAt || t.session.runEndsAt);
     $('shuffleTeams').disabled = !connected || locked || state.teams.length < 2;
     $('shuffleHint').textContent = locked ? 'Order is locked once calibration or competition begins.' : 'Draw the running order before calibration begins.';
   }
   if (page === 'display' && $('displayShuffle')) {
-    $('displayShuffle').disabled = !connected || shuffleLocked();
+    const drawing = window.ITEXStage?.isDrawing();
+    $('displayShuffle').disabled = !connected || shuffleLocked() || drawing;
+    $('displayShuffle').querySelector('span').textContent = drawing ? 'Drawing the order…' : 'Shuffle team order';
     $('displayShuffleHint').textContent = shuffleLocked() ? 'Running order is locked after calibration or competition starts.' : 'Shuffle here to draw the order for everyone. Staff panels update automatically.';
   }
   if (page === 'coordinator' && state) {
@@ -181,11 +222,15 @@ function updateClock() {
   const hint = running ? `Attempt ${running.number} of 4 · ${paused ? 'Paused by the judge' : 'On track'}` : t?.attempts.length === 4 ? 'All four attempts recorded.' : t?.session.runEndsAt && !runActive(t) ? 'The team’s run window has ended.' : runActive(t) ? paused ? 'Run window paused by the judge.' : 'Ready for the next attempt.' : calibrationActive(t) ? 'Calibration in progress.' : 'Up to four attempts in the team’s run window.';
   $('attemptHint').textContent = hint;
   if (page !== 'admin') {
-    if ($('liveStatus')) $('liveStatus').textContent = paused ? 'Timing paused' : running ? 'Robot on track' : calibrationActive(t) ? 'Calibration' : t ? 'Team on track' : 'Waiting for a team';
+    if ($('liveStatus')) $('liveStatus').textContent = !connected ? 'Connection lost · timing offline' : paused ? 'Timing paused' : running ? 'Robot on track' : calibrationActive(t) ? 'Calibration' : t?.session.runEndsAt && !runActive(t) ? 'Run window finished' : t ? 'Ready for the next attempt' : 'Waiting for a team';
     $('displayContent').classList.toggle('is-running', !!running && !paused && connected);
     $('displayContent').classList.toggle('is-paused', paused);
     if ($('liveAttemptTime')) $('liveAttemptTime').textContent = time(elapsed);
+    const attemptCaption = document.querySelector('.audience-attempt.on-track small');
+    if (attemptCaption) attemptCaption.textContent = !connected ? 'Connection lost' : paused ? 'Paused' : 'On track';
     if ($('audienceAttemptLabel')) $('audienceAttemptLabel').textContent = `${t?.attempts.length || 0} of 4 attempts used`;
+    const mode = !connected ? 'offline' : paused ? 'paused' : running ? 'running' : calibrationActive(t) ? 'calibration' : t?.session.runEndsAt && !runActive(t) ? 'finished' : latest ? 'recorded' : 'ready';
+    window.ITEXStage?.timer(mode, `${t?.id}:${t?.session.generation || 0}:${mode}:${latest?.number || 0}`);
     if ($('windowProgress')) $('windowProgress').style.width = `${Math.min(100, s.remaining / (t?.session.runEndsAt ? 600000 : 120000) * 100)}%`;
     return;
   }
@@ -230,8 +275,9 @@ function renderCoordinator() {
   $('reviewStatus').textContent = `${state.teams.length} teams · ${pending} ${pending === 1 ? 'attempt' : 'attempts'} awaiting marks`;
   const active = state.teams.find(t => t.id === state.currentTeamId);
   $('activeTeam').textContent = active ? `At competition control: ${active.name}` : 'Competition control has not selected a team.';
-  $('reviewSummary').innerHTML = state.teams.length ? state.teams.map((t, i) => `<section class="review-team ${t.id === reviewTeamId ? 'review-selected' : ''}"><div class="panel-heading"><div><h2><span class="muted">${String(i + 1).padStart(2, '0')} · </span>${escapeHtml(t.name)}</h2><p>${t.id === state.currentTeamId ? 'Selected at competition control · ' : ''}${t.attempts.length}/4 attempts used${t.best ? ` · Best: Attempt ${t.best.number} · ${marks(t.best.total)} marks · ${t.best.completed ? time(t.best.time) : 'Incomplete'}` : ' · No best attempt yet'}</p></div><button data-review-team="${t.id}" aria-pressed="${t.id === reviewTeamId}">${t.id === reviewTeamId ? 'Viewing' : reviewReady(t) ? 'Review / edit' : 'View marks'}</button></div><div class="table-wrap">${t.attempts.length ? `<table><thead><tr><th>Attempt</th><th>Time</th><th class="numeric">Judge 1</th><th class="numeric">Judge 2</th><th class="numeric">Judge 3</th><th class="numeric">Bonus</th><th class="numeric">Total</th><th>Completion</th></tr></thead><tbody>${t.attempts.map(a => `<tr><td>${a.number}${t.best?.number === a.number ? ' <span class="badge best">Best</span>' : ''}</td><td>${a.status === 'running' ? 'On track' : time(a.time)}</td>${[0,1,2].map(j => `<td class="numeric">${marks(a.scores?.[j])}</td>`).join('')}<td class="numeric">${marks(a.bonus)}</td><td class="numeric"><strong>${marks(a.total)}</strong></td><td>${a.status === 'pending' ? 'Awaiting marks' : a.status === 'running' ? 'In progress' : a.completed ? 'Completed' : 'Incomplete'}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No attempts recorded yet.</p>'}</div></section>`).join('') : '<p class="empty">No teams yet. Add teams in competition control.</p>';
+  $('reviewSummary').innerHTML = state.teams.length ? state.teams.map((t, i) => `<section class="review-team ${t.id === reviewTeamId ? 'review-selected' : ''}"><div class="panel-heading"><div><h2><span class="muted">${String(i + 1).padStart(2, '0')} · </span>${escapeHtml(t.name)}</h2><p>${t.id === state.currentTeamId ? 'Selected at competition control · ' : ''}${t.attempts.length}/4 attempts used${t.best ? ` · Best: Attempt ${t.best.number} · ${marks(t.best.total)} marks · ${time(t.best.time)}${t.best.completed ? '' : ' · Incomplete'}` : ' · No best attempt yet'}</p></div><button data-review-team="${t.id}" aria-pressed="${t.id === reviewTeamId}">${t.id === reviewTeamId ? 'Viewing' : reviewReady(t) ? 'Review / edit' : 'View marks'}</button></div><div class="table-wrap">${t.attempts.length ? `<table><thead><tr><th>Attempt</th><th>Time</th><th class="numeric">Judge 1</th><th class="numeric">Judge 2</th><th class="numeric">Judge 3</th><th class="numeric">Bonus</th><th class="numeric">Total</th><th>Completion</th></tr></thead><tbody>${t.attempts.map(a => `<tr><td>${a.number}${t.best?.number === a.number ? ' <span class="badge best">Best</span>' : ''}</td><td>${a.status === 'running' ? 'On track' : time(a.time)}</td>${[0,1,2].map(j => `<td class="numeric">${marks(a.scores?.[j])}</td>`).join('')}<td class="numeric">${marks(a.bonus)}</td><td class="numeric"><strong>${marks(a.total)}</strong></td><td>${a.status === 'pending' ? 'Awaiting marks' : a.status === 'running' ? 'In progress' : a.completed ? 'Completed' : 'Incomplete'}</td></tr>`).join('')}</tbody></table>` : '<p class="empty">No attempts recorded yet.</p>'}</div></section>`).join('') : '<p class="empty">No teams yet. Add teams in competition control.</p>';
   $('leaderboard').innerHTML = rankingHtml(state.leaderboard);
+  renderWinners();
   $('reviewTeamTitle').textContent = current() ? `Check marks · ${current().name}` : 'Check marks';
   renderForm(); renderShuffle(); updateClock();
 }
@@ -246,7 +292,7 @@ function connect() {
   ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/?role=${page}`);
   ws.onopen = () => { connected = true; $('connection').textContent = 'Connected'; $('connection').classList.add('online'); updateClock(); };
   ws.onclose = () => {
-    connected = false; $('connection').textContent = 'Offline · reconnecting'; $('connection').classList.remove('online');
+    connected = false; window.ITEXStage?.reset(); if (page === 'display') displayKey = null; $('connection').textContent = 'Offline · reconnecting'; $('connection').classList.remove('online');
     updateClock(); setTimeout(connect, 1500);
   };
   ws.onmessage = event => {
@@ -297,6 +343,7 @@ if (page === 'admin') {
     const form = document.querySelector(`[data-score-form="${button.dataset.edit}"]`);
     if (form) { form.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' }); form.elements.judge1.focus({ preventScroll: true }); }
   };
+  $('showRankings').onclick = () => send('SET_VIEW', { view: 'rankings' }, 'The top three places and scores are now on the public display.');
   $('showTeams').onclick = () => send('SET_VIEW', { view: 'teams' }, 'Team list is now on the public display. Open Public display to shuffle in front of the teams.');
   $('showRules').onclick = () => send('SET_VIEW', { view: 'rules' }, 'Course map and rules are now on the public display.');
   $('showLive').onclick = () => send('SET_VIEW', { view: 'live' }, 'Live timing is now on the public display.');
